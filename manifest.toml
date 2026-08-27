@@ -1,0 +1,13 @@
+# CoolerControl service-plugin manifest for aquapx.
+# Installed to /var/lib/coolercontrol/plugins/aquapx/manifest.toml; coolercontrold launches
+# the executable and connects over the Unix Domain Socket below to drive the D5 Next RGB.
+# The pump's SENSORS come from the kernel aquacomputer_d5next driver separately; this plugin
+# adds only the lighting CoolerControl can't otherwise control.
+id = "aquapx"
+type = "device"
+description = "Aquacomputer D5 Next RGB lighting (aquapx)"
+version = "0.1.0"
+url = "https://github.com/hirparak/aquapx"
+address = "/run/aquapx.sock"
+executable = "aquapx-plugin"
+privileged = true
