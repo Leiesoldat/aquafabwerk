@@ -1,3 +1,6 @@
+#### NOT READY FOR DISTRIBUTION ####
+
+
 # aquapx
 
 Linux RGB control for **Aquacomputer** devices — currently the **D5 Next** pump — via their
