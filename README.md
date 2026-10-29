@@ -1,5 +1,5 @@
 # NOT READY FOR DISTRIBUTION #
-Working on fixing the inability for the plugin to be launched by CoolerControl.
+Working on fixing the inability of the plugin to be launched by CoolerControl.
 
 ## aquapx
 
