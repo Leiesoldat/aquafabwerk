@@ -1,7 +1,4 @@
-# NOT READY FOR DISTRIBUTION #
-Working on fixing the inability of the plugin to be launched by CoolerControl.
-
-## aquapx
+# aquapx
 
 Linux RGB control for **Aquacomputer** devices — currently the **D5 Next** pump — via their
 USB-HID config protocol. A sibling to [coolerlink](https://github.com/hirparak/coolerlink):
