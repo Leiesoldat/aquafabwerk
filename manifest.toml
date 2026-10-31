@@ -9,5 +9,7 @@ description = "Aquacomputer D5 Next RGB lighting (aquapx)"
 version = "0.1.0"
 url = "https://github.com/hirparak/aquapx"
 address = "/run/aquapx.sock"
-executable = "aquapx-plugin"
+# Must be an absolute path: coolercontrold resolves a bare name to
+# /var/lib/coolercontrol/<id>/<name> (no "plugins/"), which doesn't exist -> systemd 203/EXEC.
+executable = "/var/lib/coolercontrol/plugins/aquapx/aquapx-plugin"
 privileged = true

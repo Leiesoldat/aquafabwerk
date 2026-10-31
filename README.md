@@ -42,10 +42,13 @@ the pump as a **lighting device**. The pump's sensors continue to come from the 
 
 ```
 go build -o bin/aquapx-plugin ./cmd/aquapx-plugin
-sudo mkdir -p /var/lib/coolercontrol/plugins/aquapx
-sudo cp bin/aquapx-plugin manifest.toml /var/lib/coolercontrol/plugins/aquapx/
-sudo systemctl restart coolercontrold
+sudo bash install.sh
 ```
+
+`install.sh` copies the binary and manifest to `/var/lib/coolercontrol/plugins/aquapx/`, and on
+SELinux systems (Bazzite, Fedora Atomic, …) labels the binary `bin_t`. Without that label systemd
+(`init_t`) is denied `execute` on files labelled `var_lib_t` and the plugin never starts. The
+manifest's `executable` must be an absolute path.
 
 ## Device access
 
