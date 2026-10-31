@@ -1,3 +1,10 @@
+## Development Disclaimer
+
+Code development utilizes Anthropic's Claude LLM. I'm not a developer so I can only verify
+code generation through actual personal system usage. Please review the code commits before
+utilizing this plugin on your system. I'm not responsible if something breaks in your
+environment.
+
 # aquapx
 
 Linux RGB control for **Aquacomputer** devices — currently the **D5 Next** pump — via their
