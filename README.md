@@ -56,10 +56,10 @@ A udev rule grants access to the Aquacomputer HID nodes without root:
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="uaccess"
 ```
 
-## Status
+## Done
 
-- ✅ **D5 Next** (`0c70:f00e`): solid colour + all 14 onboard effects, CLI + CoolerControl plugin.
-- ✅ **High Flow Next** (`0c70:f012`): colour control, CLI + CoolerControl plugin. Reverse-engineered
+- **D5 Next** (`0c70:f00e`): solid colour + all 14 onboard effects, CLI + CoolerControl plugin.
+- **High Flow Next** (`0c70:f012`): colour control, CLI + CoolerControl plugin. Reverse-engineered
   live on hardware (no captures exist for it). Its config is report `0x03`, 682 bytes, same
   CRC-16/USB scheme, laid out as eight ~70-byte LED-group blocks. Each block's colour window
   holds hue slots in **two layers** — a base/background colour plus the effect palette
@@ -67,6 +67,11 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
   red LEDs. Only hue is decoded, so the device keeps running its own flow-indicator effect
   (whose speed tracks flow rate) in the chosen colour. Sensors verified unaffected.
 
+## To Do
+
+- **Ultitube Reservoir**
+- **Leakshield**
+  
 ## System Status mode
 
 Both devices offer a **System Status (match fans)** lighting mode that mirrors coolerlink's
