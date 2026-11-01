@@ -5,11 +5,14 @@
 # adds only the lighting CoolerControl can't otherwise control.
 id = "aquapx"
 type = "device"
-description = "Aquacomputer D5 Next RGB lighting (aquapx)"
+description = "Aquacomputer RGB lighting (aquapx)"
 version = "0.1.0"
-url = "https://github.com/hirparak/aquapx"
+url = "https://github.com/leiesoldat/aquafabwerk"
 address = "/run/aquapx.sock"
-# Must be an absolute path: coolercontrold resolves a bare name to
-# /var/lib/coolercontrol/<id>/<name> (no "plugins/"), which doesn't exist -> systemd 203/EXEC.
-executable = "/var/lib/coolercontrol/plugins/aquapx/aquapx-plugin"
+# Path to the service executable. (optional)
+# If you specify only the filename, the executable is expected to be in the same plugin
+# directory as this manifest.toml.
+# If it is located elsewhere, use an absolute path. Ensure it has execute permissions (chmod +x).
+# If this is commented out, then CoolerControl will not manage the service and assume it is managed by other means (systemd, etc).
+executable = "aquapx-plugin"
 privileged = true
