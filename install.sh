@@ -19,7 +19,7 @@ install -m 0644 "$src/manifest.toml" "$dest/manifest.toml"
 # systemd (init_t) can't execute var_lib_t files under SELinux; label only the binary.
 # Note: this label is lost if the plugin directory is deleted and recreated.
 if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
-	chcon -t bin_t "$dest/aquapx-plugin"
+	semanage fcontext -a -t bin_t "$dest/aquapx-plugin"
 fi
 
 systemctl restart coolercontrold
