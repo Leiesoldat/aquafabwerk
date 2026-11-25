@@ -21,12 +21,14 @@ import (
 	"aquapx/internal/aqua"
 )
 
-// Server implements dsv1.DeviceServiceServer for both Aquacomputer RGB devices.
+// Server implements dsv1.DeviceServiceServer for the Aquacomputer RGB devices (D5 Next,
+// High Flow Next, LEAKSHIELD).
 type Server struct {
 	dsv1.UnimplementedDeviceServiceServer
 	mu    sync.RWMutex
 	dev   *aqua.D5Next
 	hfn   *aqua.HighFlowNext
+	ls    *aqua.Leakshield
 	ready chan struct{}
 	start time.Time
 
@@ -57,6 +59,19 @@ func (s *Server) SetHFN(f *aqua.HighFlowNext) {
 	s.mu.Unlock()
 }
 
+// SetLeakshield publishes the opened LEAKSHIELD.
+func (s *Server) SetLeakshield(l *aqua.Leakshield) {
+	s.mu.Lock()
+	s.ls = l
+	s.mu.Unlock()
+}
+
+func (s *Server) getLS() *aqua.Leakshield {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ls
+}
+
 func (s *Server) getDev() *aqua.D5Next {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -85,6 +100,9 @@ func (s *Server) CloseDevice() {
 	if f := s.getHFN(); f != nil {
 		_ = f.Close()
 	}
+	if l := s.getLS(); l != nil {
+		_ = l.Close()
+	}
 }
 
 func strp(s string) *string { return &s }
@@ -107,7 +125,7 @@ func (s *Server) startStatus() {
 	}
 	stop := make(chan struct{})
 	s.statusStop = stop
-	d, f := s.dev, s.hfn
+	d, f, l := s.dev, s.hfn, s.ls
 	s.mu.Unlock()
 
 	var devs []aqua.Colorer
@@ -119,6 +137,10 @@ func (s *Server) startStatus() {
 		f.NoSave = true
 		devs = append(devs, f)
 	}
+	if l != nil {
+		l.NoSave = true
+		devs = append(devs, l)
+	}
 	if len(devs) == 0 {
 		return
 	}
@@ -129,6 +151,7 @@ func (s *Server) startStatus() {
 const (
 	deviceID = "aquapx-d5next"
 	hfnID    = "aquapx-highflownext"
+	lsID     = "aquapx-leakshield"
 )
 
 // Health confirms the service is up.
@@ -198,6 +221,32 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 			},
 		})
 	}
+	// LEAKSHIELD: colour (hue/sat/brightness) decoded from aquasuite captures; no effect
+	// selector yet, so static colour, off (brightness 0) and the shared status mode.
+	if s.getLS() != nil {
+		llm := &mv1.LightingModes{}
+		cn, on, sn := "Colour", "Off", "System Status (match fans)"
+		llm.LightingMode = append(llm.LightingMode,
+			&mv1.LightingModes_LightingMode{Name: "static", FrontendName: &cn, MinColors: 1, MaxColors: 1},
+			&mv1.LightingModes_LightingMode{Name: "off", FrontendName: &on, MinColors: 0, MaxColors: 0},
+			&mv1.LightingModes_LightingMode{Name: "status", FrontendName: &sn, MinColors: 0, MaxColors: 0},
+		)
+		devs = append(devs, &mv1.Device{
+			Id:   lsID,
+			Name: "Aquacomputer LEAKSHIELD (RGB)",
+			Info: &mv1.DeviceInfo{
+				Channels: map[string]*mv1.ChannelInfo{"lighting": {
+					Label:   strp("LEAKSHIELD RGB"),
+					Options: &mv1.ChannelInfo_LightingModes{LightingModes: llm},
+				}},
+				Model: strp("LEAKSHIELD"),
+				DriverInfo: &mv1.DriverInfo{
+					Name:    strp("aquapx"),
+					Version: strp("0.1.0"),
+				},
+			},
+		})
+	}
 	return &dsv1.ListDevicesResponse{Devices: devs}, nil
 }
 
@@ -236,6 +285,19 @@ func (s *Server) Lighting(_ context.Context, req *dsv1.LightingRequest) (*dsv1.L
 	}
 	if f := s.getHFN(); f != nil {
 		f.NoSave = false
+	}
+	if l := s.getLS(); l != nil {
+		l.NoSave = false
+	}
+	if req.GetDeviceId() == lsID {
+		l := s.getLS()
+		if l == nil {
+			return &dsv1.LightingResponse{}, nil
+		}
+		if err := l.ApplyLighting(st.GetMode(), r, g, b); err != nil {
+			return nil, err
+		}
+		return &dsv1.LightingResponse{}, nil
 	}
 	if req.GetDeviceId() == hfnID {
 		f := s.getHFN()

@@ -36,6 +36,10 @@ aquapx d5 effect <name> [colour]  # onboard effect (breathing, rainbow, scanner,
 aquapx d5 off
 aquapx d5 dump                    # current LED state
 aquapx d5 effects                 # list effect names
+aquapx ls probe [rid] [file]      # LEAKSHIELD: read-only GET_FEATURE (default 0x03), save + hexdump
+aquapx ls color <RRGGBB|name>     # LEAKSHIELD colour (refuses unless the live read validates)
+aquapx ls off                     # LEAKSHIELD brightness 0
+aquapx ls dump                    # LEAKSHIELD colour state
 ```
 
 ## CoolerControl plugin
@@ -74,10 +78,26 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
   red LEDs. Only hue is decoded, so the device keeps running its own flow-indicator effect
   (whose speed tracks flow rate) in the chosen colour. Sensors verified unaffected.
 
+## In testing
+
+- **LEAKSHIELD** (`0c70:f014`): colour (hue/saturation/brightness), CLI + CoolerControl plugin.
+  Decoded from aquasuite USB captures ([`re/decode_leakshield.py`](re/decode_leakshield.py)):
+  config report `0x03`, 750 bytes, HSV record at 620–623, same CRC-16/USB scheme; the save report
+  `0x02` is sent as an **output** report. The captures only contain writes, so the first step on
+  Linux is to confirm the live read:
+
+  ```
+  go build -o bin/aquapx ./cmd/aquapx
+  sudo ./bin/aquapx ls probe            # read-only; saves leakshield_report03.bin + hexdump
+  ```
+
+  If it reports 750 bytes and CRC OK, the layout matches and `aquapx ls color` / the plugin's
+  LEAKSHIELD channel are safe to use. If not, every write is refused — share the saved `.bin`.
+  ([`re/set_color_leakshield.py`](re/set_color_leakshield.py) does the same check from Python.)
+
 ## To Do
 
 - **Ultitube Reservoir**
-- **Leakshield**
   
 ## System Status mode
 
