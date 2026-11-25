@@ -96,7 +96,8 @@ brightness full→50%→full, pastel green (50% saturation).
 - Config = **HID feature report `0x03`, 750 bytes** (0x2ee), IF1, same **CRC-16/USB over [1:748]**,
   big-endian at 748–749. Setup: `21 09 03 03 01 00 ee 02`.
 - Same write + save-report procedure as the D5 Next / High Flow Next. aquasuite sends report `0x03`
-  then the save report `0x02`, which was **byte-identical in every capture**:
+  then the save report `0x02` as an **OUTPUT report** (`21 09 02 02 01 00 0b 00`, wValue 0x0202 —
+  *not* a feature report), which was **byte-identical in every capture**:
   `02 00 00 00 02 00 00 00 00 34 c6` (`34c6` = CRC-16/USB of bytes [1:9]) — safe to send as a constant.
 - Every write in the captures was accepted (status 0) and every CRC validated.
 
