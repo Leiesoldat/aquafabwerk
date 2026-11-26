@@ -85,6 +85,38 @@ probing candidate fields and observing the LEDs.
 - **Sensors are unaffected** by these writes (verified: flow, water temp, quality all sane after).
 - Restore baseline: `re/`-saved `hfn_original_config.bin` (write it back + save report).
 
+---
+
+# LEAKSHIELD (`0c70:f014`) — RGB (reverse-engineered from captures, 2026-11-25)
+
+Decoded from aquasuite USBPcap captures (Windows 11, aquasuite → LEAKSHIELD) by diffing
+config writes that changed one colour setting at a time: red→blue, green (pure and 135°),
+brightness full→50%→full, pastel green (50% saturation).
+
+- Config = **HID feature report `0x03`, 750 bytes** (0x2ee), IF1, same **CRC-16/USB over [1:748]**,
+  big-endian at 748–749. Setup: `21 09 03 03 01 00 ee 02`.
+- Same write + save-report procedure as the D5 Next / High Flow Next. aquasuite sends report `0x03`
+  then the save report `0x02` as an **OUTPUT report** (`21 09 02 02 01 00 0b 00`, wValue 0x0202 —
+  *not* a feature report), which was **byte-identical in every capture**:
+  `02 00 00 00 02 00 00 00 00 34 c6` (`34c6` = CRC-16/USB of bytes [1:9]) — safe to send as a constant.
+- Every write in the captures was accepted (status 0) and every CRC validated.
+
+| Offset | Field | Notes |
+|---|---|---|
+| 0 | report ID | 0x03 |
+| **620–621** (0x26c) | **hue** (uint16 BE) | same **1536/360°** scale: red=0x0000, green=0x01ff (120°), blue=0x03ff (240°); 0x023f = 135° |
+| **622** (0x26e) | **saturation** | 0xff=full colour, 0x7f=pastel (50%); 0x00=white (inferred) |
+| **623** (0x26f) | **brightness** (value) | 0xff=full, 0x7f=50% |
+| 748–749 (0x2ec) | CRC-16/USB | over [1:748] |
+
+- Colour model = **HSV in one contiguous 4-byte record** `[hue16][sat][val]` — same record shape as
+  the High Flow Next colour window, but a single colour and brightness is per-colour (not a separate
+  master byte like the D5 Next @237).
+- No other bytes changed across any colour/brightness/saturation capture.
+- Not yet decoded: effect/mode selection (only static colour was captured), and whether a live
+  `GET_FEATURE(0x03)` returns the same 750-byte layout (no GET_REPORT in the captures — verify
+  before the first write, then read-modify-write as usual).
+
 ## Concurrency (learned the hard way)
 
 hidapi handles are **not safe for concurrent feature-report access**. Two goroutines doing
