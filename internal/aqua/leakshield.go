@@ -52,6 +52,9 @@ const (
 type Leakshield struct {
 	dev    *ghid.Device
 	NoSave bool
+	// Path and Interface identify the opened hidraw node (for probe diagnostics).
+	Path      string
+	Interface int
 	// mu serialises read-modify-write cycles — see D5Next.mu (concurrent feature reports on
 	// one hidapi handle EPIPE and wedge the device).
 	mu sync.Mutex
@@ -65,12 +68,13 @@ func OpenLeakshield() (*Leakshield, error) {
 		return nil, fmt.Errorf("hid init: %w", err)
 	}
 	var path, first string
+	iface, firstIface := -1, -1
 	err := ghid.Enumerate(lsVID, lsPID, func(info *ghid.DeviceInfo) error {
 		if first == "" {
-			first = info.Path
+			first, firstIface = info.Path, info.InterfaceNbr
 		}
 		if path == "" && info.InterfaceNbr == lsInterface {
-			path = info.Path
+			path, iface = info.Path, info.InterfaceNbr
 		}
 		return nil
 	})
@@ -79,7 +83,7 @@ func OpenLeakshield() (*Leakshield, error) {
 		return nil, fmt.Errorf("enumerate %04x:%04x: %w", lsVID, lsPID, err)
 	}
 	if path == "" {
-		path = first
+		path, iface = first, firstIface
 	}
 	if path == "" {
 		_ = ghid.Exit()
@@ -88,9 +92,9 @@ func OpenLeakshield() (*Leakshield, error) {
 	dev, err := ghid.OpenPath(path)
 	if err != nil {
 		_ = ghid.Exit()
-		return nil, fmt.Errorf("open LEAKSHIELD: %w", err)
+		return nil, fmt.Errorf("open LEAKSHIELD %s (interface %d): %w (permissions? try sudo or the udev rule)", path, iface, err)
 	}
-	return &Leakshield{dev: dev}, nil
+	return &Leakshield{dev: dev, Path: path, Interface: iface}, nil
 }
 
 // Close releases the device.
@@ -112,14 +116,25 @@ type ProbeResult struct {
 	CRCStore uint16
 }
 
-// Probe reads feature report rid with an oversized buffer and reports length + CRC status
-// WITHOUT refusing on mismatch. Read-only: it never writes to the device.
+// Probe reads feature report rid and reports length + CRC status WITHOUT refusing on mismatch.
+// Read-only: it never writes to the device. It first asks with an oversized buffer (so a longer
+// report is visible); some firmware stalls a GET_REPORT whose wLength exceeds the report size,
+// so on error it retries with the exact captured length (750 for report 0x03).
 func (l *Leakshield) Probe(rid byte) (*ProbeResult, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	buf := make([]byte, lsProbeLen)
 	buf[0] = rid
 	n, err := l.dev.GetFeatureReport(buf)
+	if err != nil && rid == lsReport {
+		first := err
+		buf = make([]byte, lsLen)
+		buf[0] = rid
+		n, err = l.dev.GetFeatureReport(buf)
+		if err != nil {
+			return nil, fmt.Errorf("get report 0x%02x: %v (with %d-byte buffer), %w (with %d-byte buffer)", rid, first, lsProbeLen, err, lsLen)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get report 0x%02x: %w", rid, err)
 	}

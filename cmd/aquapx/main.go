@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,6 +152,7 @@ func runLeakshield(args []string) {
 		fatal(err)
 	}
 	defer l.Close()
+	fmt.Fprintf(os.Stderr, "opened LEAKSHIELD %s (HID interface %d)\n", l.Path, l.Interface)
 	switch args[0] {
 	case "color":
 		if len(args) < 2 {
@@ -193,12 +195,16 @@ func runLeakshield(args []string) {
 		if len(args) >= 3 {
 			out = args[2]
 		}
+		fmt.Fprintf(os.Stderr, "reading feature report 0x%02x (read-only)...\n", rid)
 		p, err := l.Probe(rid)
 		if err != nil {
 			fatal(err)
 		}
 		if err := os.WriteFile(out, p.Data, 0o644); err != nil {
-			fatal(err)
+			fatal(fmt.Errorf("got %d bytes but could not save %s: %w", p.N, out, err))
+		}
+		if abs, err := filepath.Abs(out); err == nil {
+			out = abs
 		}
 		fmt.Printf("report 0x%02x: %d bytes (expected 750 for 0x03: %v)\n", rid, p.N, p.LenOK)
 		fmt.Printf("CRC-16/USB over [1:%d]: calc=%04x stored=%04x -> %s\n",
