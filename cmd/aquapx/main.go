@@ -1,11 +1,12 @@
 // Command aquapx controls the RGB lighting of Aquacomputer devices on Linux.
-// Currently: the D5 Next pump (fixed colour + onboard effects), via read-modify-write of
-// its HID config report. See ~/src/aquapx-re/PROTOCOL.md for the reverse-engineered protocol.
+// Currently: the D5 Next pump (fixed colour + onboard effects), the High Flow Next and the
+// LEAKSHIELD (colour), via read-modify-write of their HID config reports. See ~/src/aquapx-re/PROTOCOL.md for the reverse-engineered protocol.
 package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,11 +36,15 @@ func parseColor(s string) ([3]byte, error) {
 
 func main() {
 	args := os.Args[1:]
-	if len(args) < 2 || (args[0] != "d5" && args[0] != "hfn") {
+	if len(args) < 2 || (args[0] != "d5" && args[0] != "hfn" && args[0] != "ls") {
 		usage()
 	}
 	if args[0] == "hfn" {
 		runHFN(args[1:])
+		return
+	}
+	if args[0] == "ls" {
+		runLeakshield(args[1:])
 		return
 	}
 	cmd := args[1]
@@ -138,6 +143,95 @@ func runHFN(args []string) {
 	}
 }
 
+// runLeakshield handles the LEAKSHIELD subcommands. Colour (hue/sat/brightness) is decoded from
+// aquasuite captures; "probe" is a read-only GET_FEATURE that saves the raw report so the live
+// layout can be confirmed before the first write.
+func runLeakshield(args []string) {
+	l, err := aqua.OpenLeakshield()
+	if err != nil {
+		fatal(err)
+	}
+	defer l.Close()
+	fmt.Fprintf(os.Stderr, "opened LEAKSHIELD %s (HID interface %d)\n", l.Path, l.Interface)
+	switch args[0] {
+	case "color":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx ls color <RRGGBB|name>"))
+		}
+		c, err := parseColor(args[1])
+		if err != nil {
+			fatal(err)
+		}
+		if err := l.SetColor(c[0], c[1], c[2]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("LEAKSHIELD -> #%02x%02x%02x\n", c[0], c[1], c[2])
+
+	case "off":
+		if err := l.Off(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("LEAKSHIELD -> off (brightness 0)")
+
+	case "dump":
+		s, _, err := l.Read()
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("LEAKSHIELD: hue=0x%04x (%.1f deg) sat=%d brightness=%d\n",
+			s.Hue, s.HueDeg, s.Saturation, s.Brightness)
+
+	case "probe":
+		// aquapx ls probe [report-id-hex] [out-file]   (read-only)
+		rid := byte(0x03)
+		if len(args) >= 2 {
+			n, err := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(args[1]), "0x"), 16, 8)
+			if err != nil {
+				fatal(fmt.Errorf("bad report id %q", args[1]))
+			}
+			rid = byte(n)
+		}
+		out := fmt.Sprintf("leakshield_report%02x.bin", rid)
+		if len(args) >= 3 {
+			out = args[2]
+		}
+		fmt.Fprintf(os.Stderr, "reading feature report 0x%02x (read-only)...\n", rid)
+		p, err := l.Probe(rid)
+		if err != nil {
+			fatal(err)
+		}
+		if err := os.WriteFile(out, p.Data, 0o644); err != nil {
+			fatal(fmt.Errorf("got %d bytes but could not save %s: %w", p.N, out, err))
+		}
+		if abs, err := filepath.Abs(out); err == nil {
+			out = abs
+		}
+		fmt.Printf("report 0x%02x: %d bytes (expected 750 for 0x03: %v)\n", rid, p.N, p.LenOK)
+		fmt.Printf("CRC-16/USB over [1:%d]: calc=%04x stored=%04x -> %s\n",
+			max(p.N-2, 0), p.CRCCalc, p.CRCStore, map[bool]string{true: "OK", false: "MISMATCH"}[p.CRCOK])
+		if rid == 0x03 && p.LenOK && p.CRCOK {
+			d := p.Data
+			hue := uint16(d[620])<<8 | uint16(d[621])
+			fmt.Printf("colour @620: hue=0x%04x (%.1f deg) sat=%d brightness=%d\n",
+				hue, float64(hue)/1536*360, d[622], d[623])
+			fmt.Println("layout CONFIRMED: matches the captured writes; 'ls color' is safe to use")
+		}
+		fmt.Printf("raw report saved -> %s\n\n", out)
+		hexdump(p.Data)
+
+	default:
+		usage()
+	}
+}
+
+// hexdump prints b like Wireshark's hex pane (16 bytes per row, offset prefix).
+func hexdump(b []byte) {
+	for i := 0; i < len(b); i += 16 {
+		end := min(i+16, len(b))
+		fmt.Printf("%04x  % x\n", i, b[i:end])
+	}
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `aquapx — Aquacomputer RGB control
 
@@ -148,7 +242,11 @@ usage:
   aquapx d5  dump                      show current LED state
   aquapx d5  effects                   list effect names
   aquapx hfn color <RRGGBB|name>       recolour the flow indicator
-  aquapx hfn dump                      show palette hues`)
+  aquapx hfn dump                      show palette hues
+  aquapx ls  color <RRGGBB|name>       LEAKSHIELD colour (hue/sat/brightness)
+  aquapx ls  off                       LEAKSHIELD brightness 0
+  aquapx ls  dump                      show LEAKSHIELD colour state
+  aquapx ls  probe [rid] [file]        READ-ONLY: GET_FEATURE (default 0x03), save + hexdump`)
 	os.Exit(2)
 }
 

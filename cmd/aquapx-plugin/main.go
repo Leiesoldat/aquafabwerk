@@ -55,6 +55,14 @@ func main() {
 		log.Printf("High Flow Next not available: %v (continuing without it)", err)
 	}
 
+	// LEAKSHIELD: best-effort like the High Flow Next.
+	if l, err := aqua.OpenLeakshield(); err == nil {
+		svc.SetLeakshield(l)
+		log.Println("LEAKSHIELD opened; lighting channel published")
+	} else {
+		log.Printf("LEAKSHIELD not available: %v (continuing without it)", err)
+	}
+
 	go func() {
 		for attempt := 1; ; attempt++ {
 			d, err := aqua.OpenD5Next()
