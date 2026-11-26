@@ -113,9 +113,45 @@ brightness full→50%→full, pastel green (50% saturation).
   the High Flow Next colour window, but a single colour and brightness is per-colour (not a separate
   master byte like the D5 Next @237).
 - No other bytes changed across any colour/brightness/saturation capture.
-- Not yet decoded: effect/mode selection (only static colour was captured), and whether a live
-  `GET_FEATURE(0x03)` returns the same 750-byte layout (no GET_REPORT in the captures — verify
-  before the first write, then read-modify-write as usual).
+- Live `GET_FEATURE(0x03)` **verified on hardware** (2026-11-26): returns the same 750-byte layout
+  with a valid CRC, so read-modify-write works as on the other devices.
+
+## LEAKSHIELD effects (decoded 2026-11-26)
+
+From one aquasuite capture stepping through every effect in order (base colour red). Only
+**[577:644]** changes between effects; every write's CRC validated.
+
+- **Effect selector = byte 577 (0x241)**, with the **same values as the D5 Next** (@663) plus three
+  LEAKSHIELD-only effects.
+- 579 = effect sub-parameter (0x04 colour change, 0x06 blinking/bar graph, 0x07 colour gradient,
+  else 0x00). 586–619 = per-effect parameters (speed/timing; not individually decoded).
+- From **620**: a list of 4-byte HSV **colour slots** `[hue16 BE][sat][val]` (slot *k* at 620+4*k*).
+  Single colour uses slot 0 (= the static colour record above). Several effects start with a
+  dim background record (`00 00 00 0f`) in slot 0 and put the foreground colour in slot 1.
+- aquasuite rewrites the whole [577:644] block on every effect change, so aquapx replays each
+  effect's captured block and writes the base colour into its primary slot.
+
+| aquasuite name | aquapx mode | Selector @577 | Base-colour slot |
+|---|---|---|---|
+| Rotating rainbow | `rainbow` | 0x03 | — (self-coloured) |
+| Swiping rainbow | `swipingrainbow` | 0x13 | — |
+| Single color | `static` | 0x01 | 0 |
+| Breathing | `breathing` | 0x02 | 0 |
+| Color shift | `colorshift` | 0x0c | 0 |
+| Color change | `colorchange` | 0x05 | 0 (+ 2 more palette colours) |
+| Blinking | `blinking` | 0x04 | 1 |
+| Color sequence | `colorsequence` | 0x0b | 0 (+ 1 more) |
+| Sequence | `sequence` | 0x07 | 1 (+ 1 more) |
+| Scanner | `scanner` | 0x08 | 1 (+ 1 more) |
+| Laser | `laser` | 0x09 | 1 (+ 1 more) |
+| Wave | `wave` | 0x0a | 1 |
+| Flame | `flame` | 0x0e | — (3 flame colours) |
+| **Color switch** | `colorswitch` | **0x12** | — (6-colour palette) |
+| **Bar graph** | `bargraph` | **0x0d** | — (5-colour palette; source/range params at 579+) |
+| **Color gradient** | `colorgradient` | **0x21** | — (gradient stops) |
+
+- Not yet decoded: the individual parameter fields (speed, direction, bar-graph data source and
+  range), and editing the extra palette colours. Those need captures that change one at a time.
 
 ## Concurrency (learned the hard way)
 

@@ -191,7 +191,8 @@ func (l *Leakshield) writeConfig(cfg []byte) error {
 	return nil
 }
 
-// SetColor sets the LED colour from 8-bit RGB (hue, saturation and brightness).
+// SetColor sets a single static colour from 8-bit RGB (hue, saturation and brightness). It
+// also selects the static effect, so it overrides any running onboard effect.
 func (l *Leakshield) SetColor(r, g, b byte) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -199,12 +200,15 @@ func (l *Leakshield) SetColor(r, g, b byte) error {
 	if err != nil {
 		return err
 	}
-	lsApplyColor(cfg, r, g, b)
+	if err := lsApplyEffect(cfg, "static", true, r, g, b); err != nil {
+		return err
+	}
 	return l.writeConfig(cfg)
 }
 
-// Off sets brightness to 0, keeping hue and saturation. (The LEAKSHIELD's on/off flag, if it
-// has one, isn't decoded; zero brightness is the captured way to darken the LEDs.)
+// Off switches to the static effect at brightness 0, keeping the current hue and saturation.
+// (The LEAKSHIELD's on/off flag, if it has one, isn't decoded; zero brightness is the captured
+// way to darken the LEDs.)
 func (l *Leakshield) Off() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -212,12 +216,18 @@ func (l *Leakshield) Off() error {
 	if err != nil {
 		return err
 	}
-	cfg[lsOffBright] = 0
+	hue, sat := [2]byte{cfg[lsOffHue], cfg[lsOffHue+1]}, cfg[lsOffSat]
+	if err := lsApplyEffect(cfg, "static", false, 0, 0, 0); err != nil {
+		return err
+	}
+	cfg[lsOffHue], cfg[lsOffHue+1], cfg[lsOffSat], cfg[lsOffBright] = hue[0], hue[1], sat, 0
 	return l.writeConfig(cfg)
 }
 
 // LeakshieldState is a human-readable summary of the current LED config.
 type LeakshieldState struct {
+	Effect     string // effect name ("" if the selector value is unknown)
+	EffectByte byte
 	Hue        uint16
 	HueDeg     float64
 	Saturation byte
@@ -234,6 +244,8 @@ func (l *Leakshield) Read() (*LeakshieldState, []byte, error) {
 	}
 	hue := uint16(cfg[lsOffHue])<<8 | uint16(cfg[lsOffHue+1])
 	s := &LeakshieldState{
+		Effect:     leakshieldEffectName(cfg[lsOffEffect]),
+		EffectByte: cfg[lsOffEffect],
 		Hue:        hue,
 		HueDeg:     float64(hue) / hueFull * 360,
 		Saturation: cfg[lsOffSat],
@@ -242,21 +254,30 @@ func (l *Leakshield) Read() (*LeakshieldState, []byte, error) {
 	return s, cfg, nil
 }
 
-// ApplyLighting applies a CoolerControl lighting selection to the LEAKSHIELD. Only a static
-// colour is decoded (no effect selector yet), so any mode other than "off" sets the colour.
+// ApplyLighting applies a CoolerControl lighting selection (mode + base colour) to the
+// LEAKSHIELD: "off", "static", or any onboard effect name (see LeakshieldLightingModes).
 func (l *Leakshield) ApplyLighting(mode string, r, g, b byte) error {
-	if mode == "off" {
+	switch mode {
+	case "off":
 		return l.Off()
+	case "static", "":
+		return l.SetColor(r, g, b)
 	}
-	return l.SetColor(r, g, b)
+	return l.SetEffect(mode, r, g, b)
 }
 
-// lsApplyColor writes hue/sat/brightness for an RGB colour into a LEAKSHIELD config buffer.
+// lsApplyColor writes hue/sat/brightness for an RGB colour into the LEAKSHIELD's first colour
+// slot (the static colour record at 620).
 func lsApplyColor(cfg []byte, r, g, b byte) {
+	lsApplyColorAt(cfg, lsOffHue, r, g, b)
+}
+
+// lsApplyColorAt writes an RGB colour as a 4-byte HSV record [hue16 BE][sat][val] at off.
+func lsApplyColorAt(cfg []byte, off int, r, g, b byte) {
 	h, s, v := rgbToHSV(r, g, b)
 	hue := uint16(math.Round(h/360*hueFull)) % hueFull
-	cfg[lsOffHue] = byte(hue >> 8)
-	cfg[lsOffHue+1] = byte(hue)
-	cfg[lsOffSat] = byte(math.Round(s * 255))
-	cfg[lsOffBright] = byte(math.Round(v * 255))
+	cfg[off] = byte(hue >> 8)
+	cfg[off+1] = byte(hue)
+	cfg[off+2] = byte(math.Round(s * 255))
+	cfg[off+3] = byte(math.Round(v * 255))
 }

@@ -38,6 +38,8 @@ aquapx d5 dump                    # current LED state
 aquapx d5 effects                 # list effect names
 aquapx ls probe [rid] [file]      # LEAKSHIELD: read-only GET_FEATURE (default 0x03), save + hexdump
 aquapx ls color <RRGGBB|name>     # LEAKSHIELD colour (refuses unless the live read validates)
+aquapx ls effect <name> [colour]  # LEAKSHIELD onboard effect (see: aquapx ls effects)
+aquapx ls effects                 # list LEAKSHIELD effects
 aquapx ls off                     # LEAKSHIELD brightness 0
 aquapx ls dump                    # LEAKSHIELD colour state
 ```
@@ -77,15 +79,19 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
   (`[hue16][0xffff]` entries) — and both must be written or you get e.g. a blue spinner over
   red LEDs. Only hue is decoded, so the device keeps running its own flow-indicator effect
   (whose speed tracks flow rate) in the chosen colour. Sensors verified unaffected.
-- **LEAKSHIELD** (`0c70:f014`): colour (hue/saturation/brightness), CLI + CoolerControl plugin.
+- **LEAKSHIELD** (`0c70:f014`): colour (hue/saturation/brightness) + all 16 onboard effects,
+  CLI + CoolerControl plugin.
   Decoded from aquasuite USB captures ([`re/decode_leakshield.py`](re/decode_leakshield.py)).
   Its config is report `0x03`, 750 bytes, on HID interface 1 (the device has two HID
   interfaces), same CRC-16/USB scheme, with a single HSV record at 620–623
   (`[hue16 BE][saturation][brightness]`, hue on the same 1536/360° scale). The save report
   `0x02` is sent as an **output** report, not a feature report. Verified on hardware: the live
-  read matches the captured layout and CoolerControl sets the colour. Effect selection isn't
-  decoded, so the plugin offers Colour, Off (brightness 0) and System Status.
-  `aquapx ls probe` does a read-only dump of the config report.
+  read matches the captured layout and CoolerControl sets the colour. Effects use the same
+  selector values as the D5 Next (byte 577), plus three LEAKSHIELD-only effects (Colour Switch,
+  Bar Graph, Colour Gradient). Each effect is applied by replaying aquasuite's captured
+  parameter block and putting the chosen colour in its main colour slot; speed and the extra
+  palette colours aren't adjustable yet. `aquapx ls probe` does a read-only dump of the config
+  report.
 
 ## To Do
 
