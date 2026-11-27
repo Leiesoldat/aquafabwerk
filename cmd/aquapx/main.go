@@ -394,6 +394,20 @@ func runFarbwerk(args []string) {
 		if strings.HasSuffix(args[2], "temp") || args[2] == "static" || args[2] == "off" {
 			fmt.Println("note: this mode follows a software sensor; run the plugin (or 'aquapx fw feed') to keep it fed")
 		}
+	case "all":
+		if len(args) < 2 || (args[1] != "on" && args[1] != "off") {
+			fatal(fmt.Errorf("usage: aquapx fw all on|off"))
+		}
+		path := aqua.FarbwerkStatePath()
+		if args[1] == "off" {
+			err = f.AllOff(path)
+		} else {
+			err = f.AllOn(path)
+		}
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Farbwerk: all outputs %s\n", args[1])
 	case "feed":
 		fmt.Println("feeding Farbwerk software sensors once a second (Ctrl-C to stop)")
 		aqua.RunFarbwerkSensors(f, make(chan struct{}))
@@ -433,6 +447,7 @@ usage:
   aquapx ls  dump                      show LEAKSHIELD colour state
   aquapx fw  dump                      Farbwerk: show all four outputs
   aquapx fw  set <1-4> <mode> [c1] [c2] Farbwerk output mode (see 'set' usage for modes)
+  aquapx fw  all on|off                all outputs off (brightness 0) / back on
   aquapx fw  sensors                   show the CPU/GPU temps aquapx feeds the Farbwerk
   aquapx fw  feed                      feed the Farbwerk's software sensors (foreground)
   aquapx ls  probe [rid] [file]        READ-ONLY: GET_FEATURE (default 0x03), save + hexdump`)

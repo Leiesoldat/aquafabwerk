@@ -15,8 +15,11 @@ package aqua
 // whose two gradient colours are equal (fwSolidSensor, fed a constant by the plugin).
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sync"
 
 	ghid "github.com/sstallion/go-hid"
@@ -350,4 +353,129 @@ func (f *Farbwerk) SetSoftwareSensors(temps [4]float64) error {
 		return fmt.Errorf("software sensor report 0x04: %w", err)
 	}
 	return nil
+}
+
+// FarbwerkLevels holds each output's two colour brightness values (val of colour 1 and
+// colour 2, 0..4095): what "All off" saves and "All on" restores.
+type FarbwerkLevels [fwOutputs][2]uint16
+
+func fwLevelOffs(n int) (int, int) {
+	o, _ := fwBlock(n)
+	return o + fwOffColor1 + 4, o + fwOffColor2 + 4
+}
+
+func fwGet16(b []byte, i int) uint16    { return uint16(b[i])<<8 | uint16(b[i+1]) }
+func fwPut16(b []byte, i int, v uint16) { b[i], b[i+1] = byte(v>>8), byte(v) }
+
+// fwAllOff zeroes every output's colour brightness, keeping modes, hues and saturations, and
+// returns the levels it replaced. lit reports whether any output was lit; if none was (already
+// off), the caller should keep its previous snapshot rather than saving zeros.
+func fwAllOff(cfg []byte) (saved FarbwerkLevels, lit bool) {
+	for n := 1; n <= fwOutputs; n++ {
+		a, b := fwLevelOffs(n)
+		saved[n-1] = [2]uint16{fwGet16(cfg, a), fwGet16(cfg, b)}
+		if saved[n-1][0] != 0 || saved[n-1][1] != 0 {
+			lit = true
+		}
+		fwPut16(cfg, a, 0)
+		fwPut16(cfg, b, 0)
+	}
+	return saved, lit
+}
+
+// fwAllOn restores outputs that are fully off (both levels 0) to their saved levels, or to full
+// brightness without a usable snapshot. Outputs set since "All off" are left alone.
+func fwAllOn(cfg []byte, snap *FarbwerkLevels) {
+	for n := 1; n <= fwOutputs; n++ {
+		a, b := fwLevelOffs(n)
+		if fwGet16(cfg, a) != 0 || fwGet16(cfg, b) != 0 {
+			continue
+		}
+		lv := [2]uint16{fwScale, fwScale}
+		if snap != nil && (snap[n-1][0] != 0 || snap[n-1][1] != 0) {
+			lv = snap[n-1]
+		}
+		fwPut16(cfg, a, lv[0])
+		fwPut16(cfg, b, lv[1])
+	}
+}
+
+// AllOff turns every output off by zeroing its brightness (modes and colours are kept), saving
+// the previous levels to statePath so AllOn can restore them, even after a restart.
+func (f *Farbwerk) AllOff(statePath string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cfg, err := f.readConfig()
+	if err != nil {
+		return err
+	}
+	saved, lit := fwAllOff(cfg)
+	if lit && statePath != "" {
+		if err := saveFarbwerkLevels(statePath, saved); err != nil {
+			return fmt.Errorf("save Farbwerk levels: %w", err)
+		}
+	}
+	return f.writeConfig(cfg)
+}
+
+// AllOn restores the outputs AllOff turned off (full brightness if nothing was saved).
+func (f *Farbwerk) AllOn(statePath string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cfg, err := f.readConfig()
+	if err != nil {
+		return err
+	}
+	var snap *FarbwerkLevels
+	if statePath != "" {
+		if s, err := loadFarbwerkLevels(statePath); err == nil {
+			snap = &s
+		}
+	}
+	fwAllOn(cfg, snap)
+	return f.writeConfig(cfg)
+}
+
+func saveFarbwerkLevels(path string, l FarbwerkLevels) error {
+	b, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func loadFarbwerkLevels(path string) (FarbwerkLevels, error) {
+	var l FarbwerkLevels
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return l, err
+	}
+	return l, json.Unmarshal(b, &l)
+}
+
+// fwPluginDir is the CoolerControl plugin directory install.sh uses.
+var fwPluginDir = "/var/lib/coolercontrol/plugins/aquapx"
+
+// FarbwerkStatePath is where the "All off" snapshot is kept, shared by the plugin and the CLI:
+// the CoolerControl plugin directory if it exists, else next to the executable.
+func FarbwerkStatePath() string {
+	if fi, err := os.Stat(fwPluginDir); err == nil && fi.IsDir() {
+		return filepath.Join(fwPluginDir, "farbwerk-levels.json")
+	}
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Join(filepath.Dir(exe), "farbwerk-levels.json")
+	}
+	return filepath.Join(os.TempDir(), "aquapx-farbwerk-levels.json")
+}
+
+// FarbwerkAllModes is the CoolerControl mode list for the "All" channel.
+func FarbwerkAllModes() []LightingMode {
+	return []LightingMode{
+		{"on", "On", 0, 0},
+		{"off", "Off", 0, 0},
+	}
 }

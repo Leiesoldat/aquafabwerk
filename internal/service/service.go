@@ -179,6 +179,8 @@ const (
 	hfnID    = "aquapx-highflownext"
 	lsID     = "aquapx-leakshield"
 	fwID     = "aquapx-farbwerk"
+	// fwAllChannel turns every Farbwerk output off (brightness 0) or back on.
+	fwAllChannel = "All"
 
 	// D5 Next channel IDs. CoolerControl shows a lighting channel's ID rather than its label,
 	// so the IDs use Aquacomputer's names: "Pump" for the pump's LED ring and "RGBpx LED" for
@@ -308,8 +310,9 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 			},
 		})
 	}
-	// Farbwerk: one lighting channel per RGB output. IDs are "Output 1".."Output 4", which
-	// survive CoolerControl's title-casing unchanged.
+	// Farbwerk: one lighting channel per RGB output ("RGB Output 1".."RGB Output 4", which
+	// CoolerControl title-cases to "Rgb Output N"; rename in CoolerControl) plus "All", which
+	// turns every output off or back on.
 	if s.getFW() != nil {
 		fwlm := &mv1.LightingModes{}
 		for _, m := range aqua.FarbwerkLightingModes() {
@@ -323,11 +326,22 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 		}
 		chs := map[string]*mv1.ChannelInfo{}
 		for n := 1; n <= 4; n++ {
-			id := fmt.Sprintf("Output %d", n)
+			id := fmt.Sprintf("RGB Output %d", n)
 			chs[id] = &mv1.ChannelInfo{
 				Label:   strp(id),
 				Options: &mv1.ChannelInfo_LightingModes{LightingModes: fwlm},
 			}
+		}
+		alm := &mv1.LightingModes{}
+		for _, m := range aqua.FarbwerkAllModes() {
+			fn := m.Label
+			alm.LightingMode = append(alm.LightingMode, &mv1.LightingModes_LightingMode{
+				Name: m.Name, FrontendName: &fn, MinColors: m.MinColors, MaxColors: m.MaxColors,
+			})
+		}
+		chs[fwAllChannel] = &mv1.ChannelInfo{
+			Label:   strp(fwAllChannel),
+			Options: &mv1.ChannelInfo_LightingModes{LightingModes: alm},
 		}
 		devs = append(devs, &mv1.Device{
 			Id:   fwID,
@@ -422,8 +436,24 @@ func (s *Server) Lighting(_ context.Context, req *dsv1.LightingRequest) (*dsv1.L
 		if f == nil {
 			return &dsv1.LightingResponse{}, nil
 		}
+		ch := strings.ToLower(req.GetChannelId())
+		if ch == strings.ToLower(fwAllChannel) {
+			var err error
+			switch st.GetMode() {
+			case "off":
+				err = f.AllOff(aqua.FarbwerkStatePath())
+			case "on":
+				err = f.AllOn(aqua.FarbwerkStatePath())
+			default:
+				err = fmt.Errorf("unknown Farbwerk All mode %q", st.GetMode())
+			}
+			if err != nil {
+				return nil, err
+			}
+			return &dsv1.LightingResponse{}, nil
+		}
 		var n int
-		if _, err := fmt.Sscanf(strings.ToLower(req.GetChannelId()), "output %d", &n); err != nil {
+		if _, err := fmt.Sscanf(strings.TrimPrefix(ch, "rgb "), "output %d", &n); err != nil {
 			return nil, fmt.Errorf("unknown Farbwerk channel %q", req.GetChannelId())
 		}
 		var c1, c2 *[3]byte

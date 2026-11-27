@@ -135,7 +135,8 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     `aquapx ls probe` does a read-only dump of the config report.
 
 - **Farbwerk** (original, `0c70:f00a`, testing): the four RGB outputs as CoolerControl
-  lighting channels "Output 1"–"Output 4", CLI `aquapx fw dump|set|sensors|feed`.
+  lighting channels "RGB Output 1"–"RGB Output 4", plus "All", CLI
+  `aquapx fw dump|set|all|sensors|feed`.
   Decoded from aquasuite USB captures
   ([`internal/aqua/testdata/farbwerk_writes.txt`](internal/aqua/testdata/farbwerk_writes.txt),
   details in [`re/PROTOCOL.md`](re/PROTOCOL.md)).
@@ -148,6 +149,12 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     temperature (`nvidia-smi`, else `amdgpu`), 4 = a constant.
   - The Farbwerk has no plain colour mode, so Single Colour and Off are software sensor 4's
     mode with both gradient colours equal.
+  - **All**: Off sets every output's brightness to 0, keeping each output's mode and colours;
+    On restores them. The previous brightness is saved in `farbwerk-levels.json` in the plugin
+    directory, so it survives a restart. An output given a new colour while All is off stays
+    as set.
+  - CoolerControl title-cases "RGB Output 1" to "Rgb Output 1"; rename the channels in
+    CoolerControl, as for the D5 Next's RGBpx LED.
   - Left as aquasuite set them: gradient range, strip type, refresh speed, low-pass filter,
     fading and "optimized colors".
 

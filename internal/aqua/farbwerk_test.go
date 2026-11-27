@@ -205,3 +205,62 @@ func TestHwmonTemp(t *testing.T) {
 }
 
 func itoa(i int) string { return string(rune('0' + i)) }
+
+// "All off" zeroes only the colour brightness of every output and "All on" restores it,
+// through the saved snapshot file.
+func TestFarbwerkAllOffOn(t *testing.T) {
+	fx, _ := loadFW(t)
+	base := fx["options2-7"]
+	cfg := fwCopy(base)
+	saved, lit := fwAllOff(cfg)
+	if !lit {
+		t.Fatal("capture has lit outputs")
+	}
+	for n := 1; n <= fwOutputs; n++ {
+		a, b := fwLevelOffs(n)
+		if fwGet16(cfg, a) != 0 || fwGet16(cfg, b) != 0 {
+			t.Errorf("output %d still lit", n)
+		}
+	}
+	for i := range cfg {
+		isLevel := false
+		for n := 1; n <= fwOutputs; n++ {
+			a, b := fwLevelOffs(n)
+			if i == a || i == a+1 || i == b || i == b+1 {
+				isLevel = true
+			}
+		}
+		if !isLevel && cfg[i] != base[i] {
+			t.Errorf("All off changed byte %d", i)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "levels.json")
+	if err := saveFarbwerkLevels(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	// A second "All off" finds nothing lit and must not replace the snapshot with zeros.
+	if _, lit := fwAllOff(fwCopy(cfg)); lit {
+		t.Error("already-off config reported lit")
+	}
+	snap, err := loadFarbwerkLevels(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwAllOn(cfg, &snap)
+	if string(cfg) != string(base) {
+		t.Error("All on didn't restore the original config")
+	}
+	// Without a snapshot, off outputs come back at full brightness; lit ones are left alone.
+	cfg2 := fwCopy(base)
+	fwAllOff(cfg2)
+	a4, _ := fwLevelOffs(4)
+	fwPut16(cfg2, a4, 0x0123)
+	fwAllOn(cfg2, nil)
+	a1, b1 := fwLevelOffs(1)
+	if fwGet16(cfg2, a1) != fwScale || fwGet16(cfg2, b1) != fwScale {
+		t.Error("no snapshot: output 1 not at full brightness")
+	}
+	if fwGet16(cfg2, a4) != 0x0123 {
+		t.Error("output 4, set after All off, was overwritten")
+	}
+}
