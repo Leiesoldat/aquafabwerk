@@ -100,6 +100,10 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     Sound Bars' byte 4 differs, 0x0e vs 0x14). Its colour's brightness goes in its colour slot,
     "Off" is a solid colour at brightness 0, and D5 Next Brightness dims it along with the pump.
     CLI: `aquapx d5 rgbpx color|effect|off|dump` (`strip` also works).
+  - **Channel names in CoolerControl**: CoolerControl title-cases lighting channel IDs, so
+    "RGBpx LED" shows up as "Rgbpx Led" ("Pump" is unaffected). To fix it, rename the channel
+    on its page in CoolerControl (v5 keeps custom names in `overrides.toml`). The plugin's
+    channel ID doesn't change, so the name and your effect settings survive plugin updates.
 - **High Flow Next** (`0c70:f012`): colour control, CLI + CoolerControl plugin. Reverse-engineered
   live on hardware (no captures exist for it). Its config is report `0x03`, 682 bytes, same
   CRC-16/USB scheme, laid out as eight ~70-byte LED-group blocks. Each block's colour window
