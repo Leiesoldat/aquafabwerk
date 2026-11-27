@@ -152,6 +152,9 @@ const (
 	deviceID = "aquapx-d5next"
 	hfnID    = "aquapx-highflownext"
 	lsID     = "aquapx-leakshield"
+
+	// stripChannel is the D5 Next's RGB output header, a second lighting channel on the pump.
+	stripChannel = "strip"
 )
 
 // Health confirms the service is up.
@@ -164,7 +167,8 @@ func (s *Server) Health(_ context.Context, _ *dsv1.HealthRequest) (*dsv1.HealthR
 	}, nil
 }
 
-// ListDevices reports the D5 Next with a single lighting channel.
+// ListDevices reports the D5 Next (pump ring + RGB output strip channels) and any other
+// Aquacomputer devices found.
 func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*dsv1.ListDevicesResponse, error) {
 	_ = s.waitDev(30 * time.Second)
 	lm := &mv1.LightingModes{}
@@ -177,10 +181,24 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 			MaxColors:    m.MaxColors,
 		})
 	}
+	slm := &mv1.LightingModes{}
+	for _, m := range aqua.StripLightingModes() {
+		fn := m.Label
+		slm.LightingMode = append(slm.LightingMode, &mv1.LightingModes_LightingMode{
+			Name:         m.Name,
+			FrontendName: &fn,
+			MinColors:    m.MinColors,
+			MaxColors:    m.MaxColors,
+		})
+	}
 	channels := map[string]*mv1.ChannelInfo{
 		"lighting": {
 			Label:   strp("Pump RGB"),
 			Options: &mv1.ChannelInfo_LightingModes{LightingModes: lm},
+		},
+		stripChannel: {
+			Label:   strp("Strip RGB (RGB output)"),
+			Options: &mv1.ChannelInfo_LightingModes{LightingModes: slm},
 		},
 	}
 	devs := []*mv1.Device{{
@@ -273,7 +291,18 @@ func (s *Server) Lighting(_ context.Context, req *dsv1.LightingRequest) (*dsv1.L
 	if cs := st.GetColors(); len(cs) > 0 {
 		r, g, b = byte(cs[0].GetR()), byte(cs[0].GetG()), byte(cs[0].GetB())
 	}
-	log.Printf("lighting: device=%s mode=%s colors=%d", req.GetDeviceId(), st.GetMode(), len(st.GetColors()))
+	log.Printf("lighting: device=%s channel=%s mode=%s colors=%d", req.GetDeviceId(), req.GetChannelId(), st.GetMode(), len(st.GetColors()))
+	// The D5 Next's RGB output strip is independent of the pump ring and the status loop.
+	if req.GetDeviceId() == deviceID && req.GetChannelId() == stripChannel {
+		dev := s.getDev()
+		if dev == nil {
+			return &dsv1.LightingResponse{}, nil
+		}
+		if err := dev.StripApplyLighting(st.GetMode(), r, g, b); err != nil {
+			return nil, err
+		}
+		return &dsv1.LightingResponse{}, nil
+	}
 	// "status" on either device drives BOTH from GPU load, matching the iCUE fans.
 	if st.GetMode() == "status" {
 		s.startStatus()

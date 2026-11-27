@@ -172,3 +172,13 @@ D5 Next-only selectors: Rain `0x0f`, Snowfall `0x10`, Stardust `0x11` (dim backg
 drop/flake colour in slot 1), Sound flash `0x14`, Sound bars `0x15`, Sound slider `0x16`,
 Sound shift `0x17`, AMBIENTpx `0x18`. The sound effects and AMBIENTpx animate from data
 aquasuite streams from the PC, which isn't decoded yet.
+
+## D5 Next RGB output / strip (decoded 2026-11-27)
+
+A second capture stepped through the same 23 effects on the RGB output header (LED strip), with
+the pump ring left on AMBIENTpx. Only **[243:310]** changes, and every write's CRC is valid. It's
+a second 67-byte effect block with the same layout and values as the pump's [663:730]. All 23
+blocks are identical except Sound bars byte +4: 0x0e on the strip, 0x14 on the pump, probably
+the bar length. Nothing else changed, so no strip-specific brightness, on/off or LED-count byte
+was seen. The pump's master brightness (237) and on/off flag (239) sit just before the strip
+block; whether they also affect the strip is untested.

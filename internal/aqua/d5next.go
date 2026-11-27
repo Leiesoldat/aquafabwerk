@@ -189,6 +189,58 @@ func (d *D5Next) Off() error {
 	return d.writeConfig(cfg)
 }
 
+// StripSetEffect sets an onboard effect (see D5NextEffects) on the RGB output strip, with
+// r,g,b as its base colour where the effect takes one. The pump ring is left untouched.
+func (d *D5Next) StripSetEffect(name string, r, g, b byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d5EffectBlock(name); !ok {
+		return fmt.Errorf("unknown D5 Next effect %q (have %v)", name, D5NextEffects())
+	}
+	cfg, err := d.readConfig()
+	if err != nil {
+		return err
+	}
+	if err := d5ApplyEffectOn(cfg, d5Strip, name, true, r, g, b); err != nil {
+		return err
+	}
+	return d.writeConfig(cfg)
+}
+
+// StripSetColor sets a solid colour on the RGB output strip.
+func (d *D5Next) StripSetColor(r, g, b byte) error { return d.StripSetEffect("static", r, g, b) }
+
+// StripOff switches the strip to a solid colour at brightness 0. No on/off flag or brightness
+// byte for the strip changed in the captures, so this is the same approach as the LEAKSHIELD.
+func (d *D5Next) StripOff() error { return d.StripSetEffect("static", 0, 0, 0) }
+
+// StripState summarises the strip's current effect and first colour slot.
+type StripState struct {
+	Effect     byte
+	EffectName string
+	Hue        uint16
+	Saturation byte
+	Value      byte
+}
+
+// StripRead returns the strip's current LED state.
+func (d *D5Next) StripRead() (*StripState, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cfg, err := d.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	o := offStripEffect + d5SlotBase
+	return &StripState{
+		Effect:     cfg[offStripEffect],
+		EffectName: d5EffectName(cfg[offStripEffect]),
+		Hue:        uint16(cfg[o])<<8 | uint16(cfg[o+1]),
+		Saturation: cfg[o+2],
+		Value:      cfg[o+3],
+	}, nil
+}
+
 // State is a human-readable summary of the current LED config.
 type State struct {
 	Brightness byte

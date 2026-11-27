@@ -98,6 +98,9 @@ func main() {
 		fmt.Printf("D5 Next: on=%v effect=0x%02x (%s) hue=0x%04x sat=%d brightness=%d\n",
 			s.On, s.Effect, s.EffectName, s.Hue, s.Saturation, s.Brightness)
 
+	case "strip":
+		runStrip(d, args[2:])
+
 	case "effects":
 		var es []string
 		for n := range aqua.Effects {
@@ -263,6 +266,58 @@ func hexdump(b []byte) {
 	}
 }
 
+// runStrip handles "aquapx d5 strip ...": the D5 Next's RGB output header, independent of
+// the pump ring.
+func runStrip(d *aqua.D5Next, args []string) {
+	if len(args) < 1 {
+		usage()
+	}
+	switch args[0] {
+	case "color":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx d5 strip color <RRGGBB|name>"))
+		}
+		c, err := parseColor(args[1])
+		if err != nil {
+			fatal(err)
+		}
+		if err := d.StripSetColor(c[0], c[1], c[2]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next strip -> solid #%02x%02x%02x\n", c[0], c[1], c[2])
+	case "effect":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx d5 strip effect <name> [RRGGBB|name]"))
+		}
+		col := [3]byte{255, 255, 255}
+		if len(args) >= 3 {
+			c, err := parseColor(args[2])
+			if err != nil {
+				fatal(err)
+			}
+			col = c
+		}
+		if err := d.StripSetEffect(args[1], col[0], col[1], col[2]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next strip -> effect %s\n", args[1])
+	case "off":
+		if err := d.StripOff(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("D5 Next strip -> off")
+	case "dump":
+		s, err := d.StripRead()
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next strip: effect=0x%02x (%s) hue=0x%04x sat=%d value=%d\n",
+			s.Effect, s.EffectName, s.Hue, s.Saturation, s.Value)
+	default:
+		usage()
+	}
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `aquapx — Aquacomputer RGB control
 
@@ -271,7 +326,11 @@ usage:
   aquapx d5  effect <name> [colour]    onboard effect (see 'effects')
   aquapx d5  off                       LEDs off
   aquapx d5  dump                      show current LED state
-  aquapx d5  effects                   list effect names
+  aquapx d5  effects                   list effect names (shared by pump and strip)
+  aquapx d5  strip color <RRGGBB|name> RGB output strip: solid colour
+  aquapx d5  strip effect <name> [col] RGB output strip: onboard effect
+  aquapx d5  strip off                 RGB output strip: brightness 0
+  aquapx d5  strip dump                RGB output strip: show effect/colour
   aquapx hfn color <RRGGBB|name>       recolour the flow indicator
   aquapx hfn dump                      show palette hues
   aquapx ls  color <RRGGBB|name>       LEAKSHIELD colour (hue/sat/brightness)

@@ -50,3 +50,25 @@ func (d *D5Next) ApplyLighting(mode string, r, g, b byte) error {
 		return d.SetEffect(mode, r, g, b)
 	}
 }
+
+// StripLightingModes is the CoolerControl mode catalogue for the D5 Next's RGB output strip:
+// the pump's list without System Status, which only drives the devices' main LEDs.
+func StripLightingModes() []LightingMode {
+	var ms []LightingMode
+	for _, m := range LightingModes() {
+		if m.Name != "status" {
+			ms = append(ms, m)
+		}
+	}
+	return ms
+}
+
+// StripApplyLighting applies a CoolerControl lighting selection to the RGB output strip.
+func (d *D5Next) StripApplyLighting(mode string, r, g, b byte) error {
+	switch mode {
+	case "off":
+		return d.StripOff()
+	default:
+		return d.StripSetEffect(mode, r, g, b)
+	}
+}

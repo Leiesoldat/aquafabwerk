@@ -86,6 +86,15 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     from the PC, which aquapx doesn't send, so they won't animate.
   - Not adjustable yet: effect speed/direction, the sensor source and range for Colour Switch
     and Bar Graph, and extra palette colours (these stay at aquasuite's defaults).
+  - **RGB output (strip)**: the accessories on the D5 Next's RGB output header are a second
+    lighting channel, "Strip RGB", on the D5 Next in CoolerControl. It has the same effects and
+    menu, minus System Status. Decoded from a capture of aquasuite stepping through all 23
+    effects on the strip
+    ([`internal/aqua/testdata/d5strip_effects.txt`](internal/aqua/testdata/d5strip_effects.txt)):
+    its effect block is bytes 243–309, with the same layout and values as the pump's (only
+    Sound Bars' byte 4 differs, 0x0e vs 0x14). Nothing else in the report changed, so the strip's
+    brightness goes in its colour slot, and "Off" is a solid colour at brightness 0. CLI:
+    `aquapx d5 strip color|effect|off|dump`.
 - **High Flow Next** (`0c70:f012`): colour control, CLI + CoolerControl plugin. Reverse-engineered
   live on hardware (no captures exist for it). Its config is report `0x03`, 682 bytes, same
   CRC-16/USB scheme, laid out as eight ~70-byte LED-group blocks. Each block's colour window
@@ -118,9 +127,6 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
 
 ## To Do
 
-- **D5 Next RGB output**: control the RGB accessories connected to the D5 Next's RGB output
-  header (separate from the pump's own LED ring). Needs captures of aquasuite changing the
-  output's colour/effect to find its fields in report `0x03`.
 - **Farbwerk Hub**: control non-Aquacomputer RGB accessories connected to the Farbwerk RGB
   headers.
   

@@ -1,7 +1,8 @@
 package aqua
 
-// D5 Next onboard effects, decoded 2026-11-27 from an aquasuite USB capture that stepped
-// through all 23 effects in the D5 Next's list (testdata/d5next_effects.txt).
+// D5 Next onboard effects, decoded 2026-11-27 from aquasuite USB captures that stepped through
+// all 23 effects in the D5 Next's list, on the pump ring (testdata/d5next_effects.txt) and on
+// the RGB output strip (testdata/d5strip_effects.txt).
 //
 // The D5 Next's per-effect block is bytes [663:730) of report 0x03 and has exactly the same
 // 67-byte layout as the LEAKSHIELD's [577:644): selector, sub-parameter, speed/timing params,
@@ -20,8 +21,9 @@ import (
 )
 
 const (
-	d5OffBlockEnd = 730 // end (exclusive) of the per-effect block [663:730)
-	d5SlotBase    = 43  // first colour slot, relative to the block start (= offHue)
+	d5BlockLen     = 67  // per-effect block length (pump [663:730), strip [243:310))
+	d5SlotBase     = 43  // first colour slot, relative to the block start (pump: = offHue)
+	offStripEffect = 243 // RGB output (strip) effect block start
 )
 
 // d5OnlyEffectBlocks are the D5 Next effects the LEAKSHIELD doesn't have, as captured.
@@ -105,35 +107,79 @@ func d5EffectName(v byte) string {
 	return ""
 }
 
-// d5ApplyEffect writes effect name's captured block into a D5 Next config buffer and turns the
-// LEDs on. With withColor, effects that take a base colour get r,g,b's hue and saturation in
-// their primary slot and its brightness as the master brightness (as SetColor always did);
-// self-coloured effects get full master brightness, as in every aquasuite capture, since
-// CoolerControl sends them no colour (black would otherwise blank the ring).
+// d5Channel is one of the D5 Next's two LED effect channels in report 0x03. Both use the same
+// 67-byte effect block and effect table; they differ in where the block sits and in how
+// brightness is set.
+type d5Channel struct {
+	name       string
+	blockStart int
+	// masterBright: the pump ring's colour brightness goes in the master brightness byte
+	// (offBright, as SetColor always did). The strip has no brightness byte of its own in the
+	// captures, so its brightness goes in the colour slot's value byte instead.
+	masterBright bool
+	overrides    map[string]map[int]byte // per-channel block bytes that differ from the table
+}
+
+var (
+	// d5Pump is the pump's own LED ring.
+	d5Pump = d5Channel{name: "pump", blockStart: offEffect, masterBright: true}
+	// d5Strip is the RGB output header ("LED controller strip"), decoded 2026-11-27 from a
+	// capture of aquasuite stepping through all 23 effects on it: block [243:310), everything
+	// else in the report unchanged. Every block matches the pump's except Sound Bars' byte 4
+	// (0x0e here, 0x14 on the pump; likely its bar length).
+	d5Strip = d5Channel{name: "strip", blockStart: offStripEffect, overrides: map[string]map[int]byte{
+		"soundbars": {4: 0x0e},
+	}}
+)
+
+// d5ApplyEffect writes an effect into the pump ring's block (see d5ApplyEffectOn).
 func d5ApplyEffect(cfg []byte, name string, withColor bool, r, g, b byte) error {
+	return d5ApplyEffectOn(cfg, d5Pump, name, withColor, r, g, b)
+}
+
+// d5ApplyEffectOn writes effect name's captured block into channel ch of a D5 Next config
+// buffer. With withColor, effects that take a base colour get r,g,b in their primary slot.
+// On the pump, the slot takes hue and saturation, the master brightness takes the colour's
+// brightness, and self-coloured effects get full master brightness, as in every aquasuite
+// capture: CoolerControl sends them no colour, and its black would otherwise blank the ring.
+// On the strip, the slot takes the whole HSV record and the master byte is left alone. The
+// pump's on/off flag is cleared whenever the pump ring is set.
+func d5ApplyEffectOn(cfg []byte, ch d5Channel, name string, withColor bool, r, g, b byte) error {
 	h, ok := d5EffectBlock(name)
 	if !ok {
 		return fmt.Errorf("unknown D5 Next effect %q (have %v)", name, D5NextEffects())
 	}
 	blk, err := hex.DecodeString(h)
-	if err != nil || len(blk) != d5OffBlockEnd-offEffect {
+	if err != nil || len(blk) != d5BlockLen {
 		return fmt.Errorf("bad effect block for %q", name)
 	}
-	copy(cfg[offEffect:d5OffBlockEnd], blk)
-	cfg[offOnOff] = 0x00
+	for i, v := range ch.overrides[name] {
+		blk[i] = v
+	}
+	copy(cfg[ch.blockStart:ch.blockStart+d5BlockLen], blk)
+	if ch.masterBright {
+		cfg[offOnOff] = 0x00
+	}
 	if !withColor {
 		return nil
 	}
-	if slot, ok := d5Primary(name); ok {
-		hh, s, v := rgbToHSV(r, g, b)
-		hue := uint16(math.Round(hh/360*hueFull)) % hueFull
-		off := offEffect + d5SlotBase + 4*slot
-		cfg[off] = byte(hue >> 8)
-		cfg[off+1] = byte(hue)
-		cfg[off+2] = byte(math.Round(s * 255))
+	slot, coloured := d5Primary(name)
+	if !coloured {
+		if ch.masterBright {
+			cfg[offBright] = 0xff
+		}
+		return nil
+	}
+	hh, s, v := rgbToHSV(r, g, b)
+	hue := uint16(math.Round(hh/360*hueFull)) % hueFull
+	off := ch.blockStart + d5SlotBase + 4*slot
+	cfg[off] = byte(hue >> 8)
+	cfg[off+1] = byte(hue)
+	cfg[off+2] = byte(math.Round(s * 255))
+	if ch.masterBright {
 		cfg[offBright] = byte(math.Round(v * 255))
 	} else {
-		cfg[offBright] = 0xff
+		cfg[off+3] = byte(math.Round(v * 255))
 	}
 	return nil
 }
