@@ -86,12 +86,21 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
   interfaces), same CRC-16/USB scheme, with a single HSV record at 620–623
   (`[hue16 BE][saturation][brightness]`, hue on the same 1536/360° scale). The save report
   `0x02` is sent as an **output** report, not a feature report. Verified on hardware: the live
-  read matches the captured layout and CoolerControl sets the colour. Effects use the same
-  selector values as the D5 Next (byte 577), plus three LEAKSHIELD-only effects (Colour Switch,
-  Bar Graph, Colour Gradient). Each effect is applied by replaying aquasuite's captured
-  parameter block and putting the chosen colour in its main colour slot; speed and the extra
-  palette colours aren't adjustable yet. `aquapx ls probe` does a read-only dump of the config
-  report.
+  read matches the captured layout and CoolerControl sets the colour.
+  - **Effects** (verified on hardware through the plugin): Rotating Rainbow, Swiping Rainbow,
+    Single Colour, Breathing, Colour Shift, Colour Change, Blinking, Colour Sequence, Sequence,
+    Scanner, Laser, Wave, Flame, Colour Switch, Bar Graph and Colour Gradient. The effect
+    selector is byte 577 and uses the same values as the D5 Next; Colour Switch (`0x12`), Bar
+    Graph (`0x0d`) and Colour Gradient (`0x21`) are LEAKSHIELD-only.
+  - Each effect has its own parameter block and colour slots in bytes 577–643, which aquasuite
+    rewrites on every change, so aquapx replays aquasuite's captured block for the effect and
+    puts the chosen colour in its main colour slot. Single-colour effects (Breathing, Scanner,
+    etc.) take CoolerControl's colour; rainbow, flame and the palette effects use their own.
+    Choosing Single Colour or Off switches back from any running effect.
+  - Not adjustable yet: effect speed/direction, Bar Graph's data source and range, and the
+    extra palette colours (these stay at aquasuite's defaults).
+  - CLI: `aquapx ls effects` lists them, `aquapx ls effect <name> [colour]` sets one, and
+    `aquapx ls probe` does a read-only dump of the config report.
 
 ## To Do
 
