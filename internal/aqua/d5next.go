@@ -9,6 +9,7 @@
 package aqua
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
 	"sync"
@@ -39,24 +40,17 @@ const hueFull = 1536
 // config write to persist it; identical across all captures, so replayed verbatim.
 var saveReport = []byte{0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x34, 0xc6}
 
-// Effects maps a friendly name to the D5 Next effect selector byte (offset 663), decoded
-// from the OpenRGB #2111 captures.
-var Effects = map[string]byte{
-	"static":         0x01,
-	"breathing":      0x02,
-	"rainbow":        0x03,
-	"blinking":       0x04,
-	"colorchange":    0x05,
-	"sequence":       0x07,
-	"scanner":        0x08,
-	"laser":          0x09,
-	"wave":           0x0a,
-	"colorsequence":  0x0b,
-	"colorshift":     0x0c,
-	"flame":          0x0e,
-	"rain":           0x0f,
-	"swipingrainbow": 0x13,
-}
+// Effects maps each D5 Next effect name to its selector byte (offset 663), derived from the
+// captured effect blocks (d5next_effects.go).
+var Effects = func() map[string]byte {
+	m := map[string]byte{}
+	for _, n := range D5NextEffects() {
+		h, _ := d5EffectBlock(n)
+		b, _ := hex.DecodeString(h[:2])
+		m[n] = b[0]
+	}
+	return m
+}()
 
 // D5Next is an open connection to the pump's HID interface. Set NoSave to skip the
 // save/commit report — the colour still applies live, but isn't persisted to the device's
@@ -158,28 +152,28 @@ func (d *D5Next) SetColor(r, g, b byte) error {
 	if err != nil {
 		return err
 	}
-	applyColor(cfg, r, g, b)
-	cfg[offEffect] = Effects["static"]
-	cfg[offOnOff] = 0x00
+	if err := d5ApplyEffect(cfg, "static", true, r, g, b); err != nil {
+		return err
+	}
 	return d.writeConfig(cfg)
 }
 
-// SetEffect sets a named onboard effect with a base colour (ignored by effects that don't
-// use one, e.g. rainbow). Returns an error for an unknown effect name.
+// SetEffect sets a named onboard effect (see D5NextEffects) by replaying aquasuite's block for
+// it, with a base colour for the effects that take one (ignored by self-coloured ones, e.g.
+// rainbow). Returns an error for an unknown effect name.
 func (d *D5Next) SetEffect(name string, r, g, b byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	eff, ok := Effects[name]
-	if !ok {
-		return fmt.Errorf("unknown effect %q", name)
+	if _, ok := d5EffectBlock(name); !ok {
+		return fmt.Errorf("unknown D5 Next effect %q (have %v)", name, D5NextEffects())
 	}
 	cfg, err := d.readConfig()
 	if err != nil {
 		return err
 	}
-	applyColor(cfg, r, g, b)
-	cfg[offEffect] = eff
-	cfg[offOnOff] = 0x00
+	if err := d5ApplyEffect(cfg, name, true, r, g, b); err != nil {
+		return err
+	}
 	return d.writeConfig(cfg)
 }
 
@@ -220,22 +214,8 @@ func (d *D5Next) Read() (*State, []byte, error) {
 		Hue:        uint16(cfg[offHue])<<8 | uint16(cfg[offHue+1]),
 		Saturation: cfg[offSat],
 	}
-	for name, v := range Effects {
-		if v == s.Effect {
-			s.EffectName = name
-		}
-	}
+	s.EffectName = d5EffectName(s.Effect)
 	return s, cfg, nil
-}
-
-// applyColor writes hue/sat/brightness fields for an RGB colour into a config buffer.
-func applyColor(cfg []byte, r, g, b byte) {
-	h, s, v := rgbToHSV(r, g, b)
-	hue := uint16(math.Round(h/360*hueFull)) % hueFull
-	cfg[offHue] = byte(hue >> 8)
-	cfg[offHue+1] = byte(hue)
-	cfg[offSat] = byte(math.Round(s * 255))
-	cfg[offBright] = byte(math.Round(v * 255))
 }
 
 // rgbToHSV converts 8-bit RGB to H[0,360) S[0,1] V[0,1].

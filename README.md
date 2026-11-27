@@ -71,7 +71,21 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
 
 ## Done
 
-- **D5 Next** (`0c70:f00e`): solid colour + all 14 onboard effects, CLI + CoolerControl plugin.
+- **D5 Next** (`0c70:f00e`): solid colour + all 23 onboard effects, CLI + CoolerControl plugin.
+  - Decoded from an aquasuite USB capture stepping through every effect
+    ([`internal/aqua/testdata/d5next_effects.txt`](internal/aqua/testdata/d5next_effects.txt)).
+    The effect block is bytes 663–729 of report `0x03`, with the same layout as the LEAKSHIELD's
+    577–643 block. The 15 shared effects are byte-identical, so both devices use one table.
+    aquapx replays aquasuite's whole block for the chosen effect, so the sub-parameter and
+    palette always match the effect, and puts the chosen colour in its main colour slot.
+  - **In CoolerControl**: Rotating Rainbow, Swiping Rainbow, Single Colour, Breathing, Colour
+    Shift, Colour Change, Blinking, Colour Sequence, Sequence, Scanner, Laser, Wave, Flame, Rain,
+    Snowfall (`0x10`), Stardust (`0x11`), Colour Switch (`0x12`) and Bar Graph (`0x0d`).
+  - **CLI only**: Sound Bars (`0x15`), Sound Flash (`0x14`), Sound Slider (`0x16`), Sound Shift
+    (`0x17`) and AMBIENTpx (`0x18`). aquasuite drives these with audio or screen data streamed
+    from the PC, which aquapx doesn't send, so they won't animate.
+  - Not adjustable yet: effect speed/direction, the sensor source and range for Colour Switch
+    and Bar Graph, and extra palette colours (these stay at aquasuite's defaults).
 - **High Flow Next** (`0c70:f012`): colour control, CLI + CoolerControl plugin. Reverse-engineered
   live on hardware (no captures exist for it). Its config is report `0x03`, 682 bytes, same
   CRC-16/USB scheme, laid out as eight ~70-byte LED-group blocks. Each block's colour window
