@@ -189,8 +189,8 @@ func (d *D5Next) Off() error {
 	return d.writeConfig(cfg)
 }
 
-// SetBrightness sets the pump ring's overall (master) brightness, 0..100%, leaving its effect
-// and colours alone.
+// SetBrightness sets the D5 Next's master brightness, 0..100%, leaving effects and colours
+// alone. Verified on hardware: it dims both the pump ring and the RGBpx LEDs.
 func (d *D5Next) SetBrightness(pct int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -202,7 +202,7 @@ func (d *D5Next) SetBrightness(pct int) error {
 	return d.writeConfig(cfg)
 }
 
-// Brightness returns the pump ring's overall brightness, 0..100%.
+// Brightness returns the D5 Next's master brightness, 0..100%.
 func (d *D5Next) Brightness() (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

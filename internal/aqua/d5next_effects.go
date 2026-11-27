@@ -117,10 +117,10 @@ type d5Channel struct {
 }
 
 var (
-	// d5Pump is the pump's own LED ring. Its overall brightness is the master brightness byte
-	// (offBright), set separately by SetBrightness.
+	// d5Pump is the pump's own LED ring. Overall brightness is the master brightness byte
+	// (offBright), set separately by SetBrightness; it dims the RGBpx LEDs too.
 	d5Pump = d5Channel{name: "pump", blockStart: offEffect, onOffFlag: true}
-	// d5Strip is the RGB output header ("LED controller strip"), decoded 2026-11-27 from a
+	// d5Strip is the RGBpx LED output header (aquasuite: "RGBpx LED"), decoded 2026-11-27 from a
 	// capture of aquasuite stepping through all 23 effects on it: block [243:310), everything
 	// else in the report unchanged. Every block matches the pump's except Sound Bars' byte 4
 	// (0x0e here, 0x14 on the pump; likely its bar length).

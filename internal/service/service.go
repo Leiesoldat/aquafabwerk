@@ -158,11 +158,15 @@ const (
 	hfnID    = "aquapx-highflownext"
 	lsID     = "aquapx-leakshield"
 
-	// stripChannel is the D5 Next's RGB output header, a second lighting channel on the pump.
-	stripChannel = "strip"
-	// pumpBrightChannel is a 0..100% "fan-style" channel that sets the pump ring's master
-	// brightness: CoolerControl's lighting protocol has no brightness setting of its own.
-	pumpBrightChannel = "pump_brightness"
+	// D5 Next channel IDs. CoolerControl shows a lighting channel's ID rather than its label,
+	// so the IDs use Aquacomputer's names: "Pump" for the pump's LED ring and "RGBpx LED" for
+	// the RGBpx output header.
+	pumpChannel  = "Pump"
+	stripChannel = "RGBpx LED"
+	// pumpBrightChannel is a 0..100% "fan-style" channel that sets the D5 Next's master
+	// brightness (byte 237, verified on hardware to dim both the pump ring and the RGBpx LEDs):
+	// CoolerControl's lighting protocol has no brightness setting of its own.
+	pumpBrightChannel = "brightness"
 )
 
 // Health confirms the service is up.
@@ -200,16 +204,16 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 		})
 	}
 	channels := map[string]*mv1.ChannelInfo{
-		"lighting": {
-			Label:   strp("Pump RGB"),
+		pumpChannel: {
+			Label:   strp(pumpChannel),
 			Options: &mv1.ChannelInfo_LightingModes{LightingModes: lm},
 		},
 		stripChannel: {
-			Label:   strp("Strip RGB (RGB output)"),
+			Label:   strp(stripChannel),
 			Options: &mv1.ChannelInfo_LightingModes{LightingModes: slm},
 		},
 		pumpBrightChannel: {
-			Label: strp("Pump RGB Brightness"),
+			Label: strp("D5 Next Brightness"),
 			Options: &mv1.ChannelInfo_SpeedOptions{SpeedOptions: &mv1.SpeedOptions{
 				MinDuty: 0, MaxDuty: 100, FixedEnabled: true,
 			}},
@@ -324,7 +328,8 @@ func (s *Server) EnableManualFanControl(_ context.Context, _ *dsv1.EnableManualF
 	return &dsv1.EnableManualFanControlResponse{}, nil
 }
 
-// FixedDuty sets the pump ring's brightness from the "Pump RGB Brightness" channel (0..100%).
+// FixedDuty sets the D5 Next's brightness (pump ring and RGBpx LEDs) from the "D5 Next
+// Brightness" channel (0..100%).
 func (s *Server) FixedDuty(_ context.Context, req *dsv1.FixedDutyRequest) (*dsv1.FixedDutyResponse, error) {
 	log.Printf("fixed duty: device=%s channel=%s duty=%d", req.GetDeviceId(), req.GetChannelId(), req.GetDuty())
 	if req.GetDeviceId() != deviceID || req.GetChannelId() != pumpBrightChannel {
@@ -355,7 +360,8 @@ func (s *Server) Lighting(_ context.Context, req *dsv1.LightingRequest) (*dsv1.L
 		r, g, b = byte(cs[0].GetR()), byte(cs[0].GetG()), byte(cs[0].GetB())
 	}
 	log.Printf("lighting: device=%s channel=%s mode=%s colors=%d", req.GetDeviceId(), req.GetChannelId(), st.GetMode(), len(st.GetColors()))
-	// The D5 Next's RGB output strip is independent of the pump ring and the status loop.
+	// The D5 Next's RGBpx LED output is independent of the pump ring and the status loop.
+	// (Any other D5 Next channel, including "Pump", falls through to the pump ring below.)
 	if req.GetDeviceId() == deviceID && req.GetChannelId() == stripChannel {
 		dev := s.getDev()
 		if dev == nil {
