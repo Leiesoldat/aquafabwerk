@@ -86,6 +86,12 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     from the PC, which aquapx doesn't send, so they won't animate.
   - Not adjustable yet: effect speed/direction, the sensor source and range for Colour Switch
     and Bar Graph, and extra palette colours (these stay at aquasuite's defaults).
+  - **Brightness**: CoolerControl's lighting protocol has no brightness setting, so the D5
+    Next gets a "Pump RGB Brightness" 0–100% channel. It shows up like a fan channel; set it
+    to a fixed value. It drives the master brightness byte (237). Effects never change it: a
+    picked colour's brightness goes in the effect's colour slot instead. CLI:
+    `aquapx d5 brightness [0-100]`. The strip doesn't have a slider yet: no strip brightness
+    byte showed up in the captures.
   - **RGB output (strip)**: the accessories on the D5 Next's RGB output header are a second
     lighting channel, "Strip RGB", on the D5 Next in CoolerControl. It has the same effects and
     menu, minus System Status. Decoded from a capture of aquasuite stepping through all 23

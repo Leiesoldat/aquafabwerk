@@ -108,21 +108,18 @@ func d5EffectName(v byte) string {
 }
 
 // d5Channel is one of the D5 Next's two LED effect channels in report 0x03. Both use the same
-// 67-byte effect block and effect table; they differ in where the block sits and in how
-// brightness is set.
+// 67-byte effect block and effect table; they differ only in where the block sits.
 type d5Channel struct {
 	name       string
 	blockStart int
-	// masterBright: the pump ring's colour brightness goes in the master brightness byte
-	// (offBright, as SetColor always did). The strip has no brightness byte of its own in the
-	// captures, so its brightness goes in the colour slot's value byte instead.
-	masterBright bool
-	overrides    map[string]map[int]byte // per-channel block bytes that differ from the table
+	onOffFlag  bool                    // clear the pump's on/off flag (offOnOff) when set
+	overrides  map[string]map[int]byte // per-channel block bytes that differ from the table
 }
 
 var (
-	// d5Pump is the pump's own LED ring.
-	d5Pump = d5Channel{name: "pump", blockStart: offEffect, masterBright: true}
+	// d5Pump is the pump's own LED ring. Its overall brightness is the master brightness byte
+	// (offBright), set separately by SetBrightness.
+	d5Pump = d5Channel{name: "pump", blockStart: offEffect, onOffFlag: true}
 	// d5Strip is the RGB output header ("LED controller strip"), decoded 2026-11-27 from a
 	// capture of aquasuite stepping through all 23 effects on it: block [243:310), everything
 	// else in the report unchanged. Every block matches the pump's except Sound Bars' byte 4
@@ -138,12 +135,11 @@ func d5ApplyEffect(cfg []byte, name string, withColor bool, r, g, b byte) error 
 }
 
 // d5ApplyEffectOn writes effect name's captured block into channel ch of a D5 Next config
-// buffer. With withColor, effects that take a base colour get r,g,b in their primary slot.
-// On the pump, the slot takes hue and saturation, the master brightness takes the colour's
-// brightness, and self-coloured effects get full master brightness, as in every aquasuite
-// capture: CoolerControl sends them no colour, and its black would otherwise blank the ring.
-// On the strip, the slot takes the whole HSV record and the master byte is left alone. The
-// pump's on/off flag is cleared whenever the pump ring is set.
+// buffer. With withColor, effects that take a base colour get r,g,b as a full HSV record
+// (hue, saturation and value) in their primary slot; self-coloured effects keep aquasuite's
+// palette. Overall brightness is never touched here (see SetBrightness), so a colour change
+// can't override the brightness slider, and the black CoolerControl sends self-coloured
+// effects can't blank the LEDs.
 func d5ApplyEffectOn(cfg []byte, ch d5Channel, name string, withColor bool, r, g, b byte) error {
 	h, ok := d5EffectBlock(name)
 	if !ok {
@@ -157,17 +153,11 @@ func d5ApplyEffectOn(cfg []byte, ch d5Channel, name string, withColor bool, r, g
 		blk[i] = v
 	}
 	copy(cfg[ch.blockStart:ch.blockStart+d5BlockLen], blk)
-	if ch.masterBright {
+	if ch.onOffFlag {
 		cfg[offOnOff] = 0x00
 	}
-	if !withColor {
-		return nil
-	}
 	slot, coloured := d5Primary(name)
-	if !coloured {
-		if ch.masterBright {
-			cfg[offBright] = 0xff
-		}
+	if !withColor || !coloured {
 		return nil
 	}
 	hh, s, v := rgbToHSV(r, g, b)
@@ -176,10 +166,20 @@ func d5ApplyEffectOn(cfg []byte, ch d5Channel, name string, withColor bool, r, g
 	cfg[off] = byte(hue >> 8)
 	cfg[off+1] = byte(hue)
 	cfg[off+2] = byte(math.Round(s * 255))
-	if ch.masterBright {
-		cfg[offBright] = byte(math.Round(v * 255))
-	} else {
-		cfg[off+3] = byte(math.Round(v * 255))
-	}
+	cfg[off+3] = byte(math.Round(v * 255))
 	return nil
 }
+
+// BrightnessPercentToByte maps 0..100% to the device's 0..255 brightness scale.
+func BrightnessPercentToByte(pct int) byte {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return byte(math.Round(float64(pct) * 255 / 100))
+}
+
+// BrightnessByteToPercent maps the device's 0..255 brightness to 0..100%.
+func BrightnessByteToPercent(v byte) int { return int(math.Round(float64(v) * 100 / 255)) }

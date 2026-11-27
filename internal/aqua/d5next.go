@@ -189,6 +189,30 @@ func (d *D5Next) Off() error {
 	return d.writeConfig(cfg)
 }
 
+// SetBrightness sets the pump ring's overall (master) brightness, 0..100%, leaving its effect
+// and colours alone.
+func (d *D5Next) SetBrightness(pct int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cfg, err := d.readConfig()
+	if err != nil {
+		return err
+	}
+	cfg[offBright] = BrightnessPercentToByte(pct)
+	return d.writeConfig(cfg)
+}
+
+// Brightness returns the pump ring's overall brightness, 0..100%.
+func (d *D5Next) Brightness() (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cfg, err := d.readConfig()
+	if err != nil {
+		return 0, err
+	}
+	return BrightnessByteToPercent(cfg[offBright]), nil
+}
+
 // StripSetEffect sets an onboard effect (see D5NextEffects) on the RGB output strip, with
 // r,g,b as its base colour where the effect takes one. The pump ring is left untouched.
 func (d *D5Next) StripSetEffect(name string, r, g, b byte) error {

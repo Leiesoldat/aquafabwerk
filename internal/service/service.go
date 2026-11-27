@@ -35,10 +35,15 @@ type Server struct {
 	// statusStop cancels the running status loop (the "System Status" lighting mode, which
 	// drives both devices from GPU load). nil when the mode isn't active.
 	statusStop chan struct{}
+
+	// pumpBright caches the pump ring's brightness (0..100%) for Status, so CoolerControl's
+	// polling doesn't read the config report every second. -1 until first read or set.
+	brightMu   sync.Mutex
+	pumpBright int
 }
 
 // New builds a Server with no devices yet; call SetDevice/SetHFN once they're open.
-func New() *Server { return &Server{ready: make(chan struct{}), start: time.Now()} }
+func New() *Server { return &Server{ready: make(chan struct{}), start: time.Now(), pumpBright: -1} }
 
 // SetDevice publishes the opened pump and unblocks waiters.
 func (s *Server) SetDevice(d *aqua.D5Next) {
@@ -155,6 +160,9 @@ const (
 
 	// stripChannel is the D5 Next's RGB output header, a second lighting channel on the pump.
 	stripChannel = "strip"
+	// pumpBrightChannel is a 0..100% "fan-style" channel that sets the pump ring's master
+	// brightness: CoolerControl's lighting protocol has no brightness setting of its own.
+	pumpBrightChannel = "pump_brightness"
 )
 
 // Health confirms the service is up.
@@ -199,6 +207,12 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 		stripChannel: {
 			Label:   strp("Strip RGB (RGB output)"),
 			Options: &mv1.ChannelInfo_LightingModes{LightingModes: slm},
+		},
+		pumpBrightChannel: {
+			Label: strp("Pump RGB Brightness"),
+			Options: &mv1.ChannelInfo_SpeedOptions{SpeedOptions: &mv1.SpeedOptions{
+				MinDuty: 0, MaxDuty: 100, FixedEnabled: true,
+			}},
 		},
 	}
 	devs := []*mv1.Device{{
@@ -276,9 +290,58 @@ func (s *Server) InitializeDevice(_ context.Context, _ *dsv1.InitializeDeviceReq
 	return &dsv1.InitializeDeviceResponse{}, nil
 }
 
-// Status has no sensors to report here (the kernel driver already surfaces pump sensors).
-func (s *Server) Status(_ context.Context, _ *dsv1.StatusRequest) (*dsv1.StatusResponse, error) {
-	return &dsv1.StatusResponse{}, nil
+// Status reports the brightness channel's current value as its duty. There are no sensors
+// here (the kernel driver already surfaces the pump's sensors).
+func (s *Server) Status(_ context.Context, req *dsv1.StatusRequest) (*dsv1.StatusResponse, error) {
+	if req.GetDeviceId() != deviceID {
+		return &dsv1.StatusResponse{}, nil
+	}
+	dev := s.getDev()
+	if dev == nil {
+		return &dsv1.StatusResponse{}, nil
+	}
+	s.brightMu.Lock()
+	pct := s.pumpBright
+	s.brightMu.Unlock()
+	if pct < 0 {
+		p, err := dev.Brightness()
+		if err != nil {
+			return &dsv1.StatusResponse{}, nil
+		}
+		s.brightMu.Lock()
+		s.pumpBright, pct = p, p
+		s.brightMu.Unlock()
+	}
+	duty := float64(pct)
+	return &dsv1.StatusResponse{Status: []*mv1.Status{{
+		Id:     pumpBrightChannel,
+		Metric: &mv1.Status_Speed{Speed: &mv1.Status_FanSpeed{Duty: &duty}},
+	}}}, nil
+}
+
+// EnableManualFanControl is a no-op: the brightness channel needs no mode switch.
+func (s *Server) EnableManualFanControl(_ context.Context, _ *dsv1.EnableManualFanControlRequest) (*dsv1.EnableManualFanControlResponse, error) {
+	return &dsv1.EnableManualFanControlResponse{}, nil
+}
+
+// FixedDuty sets the pump ring's brightness from the "Pump RGB Brightness" channel (0..100%).
+func (s *Server) FixedDuty(_ context.Context, req *dsv1.FixedDutyRequest) (*dsv1.FixedDutyResponse, error) {
+	log.Printf("fixed duty: device=%s channel=%s duty=%d", req.GetDeviceId(), req.GetChannelId(), req.GetDuty())
+	if req.GetDeviceId() != deviceID || req.GetChannelId() != pumpBrightChannel {
+		return &dsv1.FixedDutyResponse{}, nil
+	}
+	dev := s.getDev()
+	if dev == nil {
+		return &dsv1.FixedDutyResponse{}, nil
+	}
+	pct := int(req.GetDuty())
+	if err := dev.SetBrightness(pct); err != nil {
+		return nil, err
+	}
+	s.brightMu.Lock()
+	s.pumpBright = aqua.BrightnessByteToPercent(aqua.BrightnessPercentToByte(pct))
+	s.brightMu.Unlock()
+	return &dsv1.FixedDutyResponse{}, nil
 }
 
 // Lighting applies a lighting mode + base colour from the CoolerControl UI to the pump.

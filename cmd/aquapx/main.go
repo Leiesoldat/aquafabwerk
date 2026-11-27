@@ -101,6 +101,24 @@ func main() {
 	case "strip":
 		runStrip(d, args[2:])
 
+	case "brightness":
+		if len(args) < 3 {
+			pct, err := d.Brightness()
+			if err != nil {
+				fatal(err)
+			}
+			fmt.Printf("D5 Next pump brightness: %d%%\n", pct)
+			return
+		}
+		pct, err := strconv.Atoi(strings.TrimSuffix(args[2], "%"))
+		if err != nil || pct < 0 || pct > 100 {
+			fatal(fmt.Errorf("usage: aquapx d5 brightness [0-100]"))
+		}
+		if err := d.SetBrightness(pct); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next -> pump brightness %d%%\n", pct)
+
 	case "effects":
 		var es []string
 		for n := range aqua.Effects {
@@ -325,6 +343,7 @@ usage:
   aquapx d5  color <RRGGBB|name>       solid colour (static effect)
   aquapx d5  effect <name> [colour]    onboard effect (see 'effects')
   aquapx d5  off                       LEDs off
+  aquapx d5  brightness [0-100]        show / set pump ring brightness
   aquapx d5  dump                      show current LED state
   aquapx d5  effects                   list effect names (shared by pump and strip)
   aquapx d5  strip color <RRGGBB|name> RGB output strip: solid colour

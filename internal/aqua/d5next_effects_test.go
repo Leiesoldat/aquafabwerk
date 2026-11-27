@@ -79,7 +79,7 @@ func TestD5EffectBlocksReproduceCaptures(t *testing.T) {
 
 // With the capture's red base colour, every effect whose primary slot held red (and every
 // self-coloured effect) must reproduce the capture exactly; a blue base colour must only land
-// in the primary slot (plus master brightness).
+// in the primary slot, never in the master brightness.
 func TestD5EffectColour(t *testing.T) {
 	names, cfgs := loadD5Effects(t)
 	for i, name := range names {
@@ -104,11 +104,11 @@ func TestD5EffectColour(t *testing.T) {
 		_ = d5ApplyEffect(got, name, true, 0, 0, 255)
 		want := append([]byte(nil), prev...)
 		_ = d5ApplyEffect(want, name, false, 0, 0, 0)
-		if got[off] != 0x04 || got[off+1] != 0x00 || got[off+2] != 0xff {
+		if got[off] != 0x04 || got[off+1] != 0x00 || got[off+2] != 0xff || got[off+3] != 0xff {
 			t.Errorf("%s: blue not in slot %d: % x", name, slot, got[off:off+4])
 		}
 		for j := range got {
-			if (j < off || j >= off+3) && j != offBright && got[j] != want[j] {
+			if (j < off || j >= off+4) && got[j] != want[j] {
 				t.Errorf("%s: byte %d changed outside slot %d", name, j, slot)
 			}
 		}
@@ -205,6 +205,32 @@ func TestD5StripColourAndIsolation(t *testing.T) {
 	for _, m := range StripLightingModes() {
 		if m.Name == "status" {
 			t.Error("strip offers status mode")
+		}
+	}
+}
+
+// Effects never touch the pump's master brightness (it belongs to the brightness slider), even
+// for a dark colour or the black CoolerControl sends self-coloured effects.
+func TestD5EffectsLeaveBrightness(t *testing.T) {
+	_, cfgs := loadD5Effects(t)
+	for _, name := range D5NextEffects() {
+		for _, ch := range []d5Channel{d5Pump, d5Strip} {
+			got := append([]byte(nil), cfgs[0]...)
+			got[offBright] = 0x42
+			_ = d5ApplyEffectOn(got, ch, name, true, 0, 0, 0)
+			if got[offBright] != 0x42 {
+				t.Errorf("%s/%s: master brightness changed to 0x%02x", ch.name, name, got[offBright])
+			}
+		}
+	}
+	for pct, want := range map[int]byte{0: 0, 50: 0x80, 100: 0xff, -5: 0, 150: 0xff} {
+		if got := BrightnessPercentToByte(pct); got != want {
+			t.Errorf("BrightnessPercentToByte(%d) = 0x%02x, want 0x%02x", pct, got, want)
+		}
+	}
+	for pct := 0; pct <= 100; pct++ {
+		if BrightnessByteToPercent(BrightnessPercentToByte(pct)) != pct {
+			t.Errorf("brightness %d%% doesn't round-trip", pct)
 		}
 	}
 }
