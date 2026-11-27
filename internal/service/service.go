@@ -11,8 +11,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,13 +24,14 @@ import (
 )
 
 // Server implements dsv1.DeviceServiceServer for the Aquacomputer RGB devices (D5 Next,
-// High Flow Next, LEAKSHIELD).
+// High Flow Next, LEAKSHIELD, Farbwerk).
 type Server struct {
 	dsv1.UnimplementedDeviceServiceServer
 	mu    sync.RWMutex
 	dev   *aqua.D5Next
 	hfn   *aqua.HighFlowNext
 	ls    *aqua.Leakshield
+	fw    *aqua.Farbwerk
 	ready chan struct{}
 	start time.Time
 
@@ -71,6 +74,21 @@ func (s *Server) SetLeakshield(l *aqua.Leakshield) {
 	s.mu.Unlock()
 }
 
+// SetFarbwerk publishes the opened Farbwerk and starts feeding its software sensors (CPU and
+// GPU temperature, plus the constant that carries solid colours) once a second.
+func (s *Server) SetFarbwerk(f *aqua.Farbwerk) {
+	s.mu.Lock()
+	s.fw = f
+	s.mu.Unlock()
+	go aqua.RunFarbwerkSensors(f, make(chan struct{}))
+}
+
+func (s *Server) getFW() *aqua.Farbwerk {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fw
+}
+
 func (s *Server) getLS() *aqua.Leakshield {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -107,6 +125,9 @@ func (s *Server) CloseDevice() {
 	}
 	if l := s.getLS(); l != nil {
 		_ = l.Close()
+	}
+	if f := s.getFW(); f != nil {
+		_ = f.Close()
 	}
 }
 
@@ -157,6 +178,7 @@ const (
 	deviceID = "aquapx-d5next"
 	hfnID    = "aquapx-highflownext"
 	lsID     = "aquapx-leakshield"
+	fwID     = "aquapx-farbwerk"
 
 	// D5 Next channel IDs. CoolerControl shows a lighting channel's ID rather than its label,
 	// so the IDs use Aquacomputer's names: "Pump" for the pump's LED ring and "RGBpx LED" for
@@ -286,6 +308,40 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 			},
 		})
 	}
+	// Farbwerk: one lighting channel per RGB output. IDs are "Output 1".."Output 4", which
+	// survive CoolerControl's title-casing unchanged.
+	if s.getFW() != nil {
+		fwlm := &mv1.LightingModes{}
+		for _, m := range aqua.FarbwerkLightingModes() {
+			fn := m.Label
+			fwlm.LightingMode = append(fwlm.LightingMode, &mv1.LightingModes_LightingMode{
+				Name:         m.Name,
+				FrontendName: &fn,
+				MinColors:    m.MinColors,
+				MaxColors:    m.MaxColors,
+			})
+		}
+		chs := map[string]*mv1.ChannelInfo{}
+		for n := 1; n <= 4; n++ {
+			id := fmt.Sprintf("Output %d", n)
+			chs[id] = &mv1.ChannelInfo{
+				Label:   strp(id),
+				Options: &mv1.ChannelInfo_LightingModes{LightingModes: fwlm},
+			}
+		}
+		devs = append(devs, &mv1.Device{
+			Id:   fwID,
+			Name: "Aquacomputer Farbwerk (RGB)",
+			Info: &mv1.DeviceInfo{
+				Channels: chs,
+				Model:    strp("Farbwerk"),
+				DriverInfo: &mv1.DriverInfo{
+					Name:    strp("aquapx"),
+					Version: strp("0.1.0"),
+				},
+			},
+		})
+	}
 	return &dsv1.ListDevicesResponse{Devices: devs}, nil
 }
 
@@ -360,6 +416,29 @@ func (s *Server) Lighting(_ context.Context, req *dsv1.LightingRequest) (*dsv1.L
 		r, g, b = byte(cs[0].GetR()), byte(cs[0].GetG()), byte(cs[0].GetB())
 	}
 	log.Printf("lighting: device=%s channel=%s mode=%s colors=%d", req.GetDeviceId(), req.GetChannelId(), st.GetMode(), len(st.GetColors()))
+	// Farbwerk outputs are independent of the other devices and of the status loop.
+	if req.GetDeviceId() == fwID {
+		f := s.getFW()
+		if f == nil {
+			return &dsv1.LightingResponse{}, nil
+		}
+		var n int
+		if _, err := fmt.Sscanf(strings.ToLower(req.GetChannelId()), "output %d", &n); err != nil {
+			return nil, fmt.Errorf("unknown Farbwerk channel %q", req.GetChannelId())
+		}
+		var c1, c2 *[3]byte
+		cs := st.GetColors()
+		if len(cs) > 0 {
+			c1 = &[3]byte{byte(cs[0].GetR()), byte(cs[0].GetG()), byte(cs[0].GetB())}
+		}
+		if len(cs) > 1 {
+			c2 = &[3]byte{byte(cs[1].GetR()), byte(cs[1].GetG()), byte(cs[1].GetB())}
+		}
+		if err := f.Apply(n, st.GetMode(), c1, c2); err != nil {
+			return nil, err
+		}
+		return &dsv1.LightingResponse{}, nil
+	}
 	// The D5 Next's RGBpx LED output is independent of the pump ring and the status loop.
 	// (Any other D5 Next channel, including "Pump", falls through to the pump ring below.)
 	if req.GetDeviceId() == deviceID && req.GetChannelId() == stripChannel {

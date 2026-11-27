@@ -134,11 +134,27 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
   - CLI: `aquapx ls effects` lists them, `aquapx ls effect <name> [colour]` sets one, and
     `aquapx ls probe` does a read-only dump of the config report.
 
+- **Farbwerk** (original, `0c70:f00a`, testing): the four RGB outputs as CoolerControl
+  lighting channels "Output 1"–"Output 4", CLI `aquapx fw dump|set|sensors|feed`.
+  Decoded from aquasuite USB captures
+  ([`internal/aqua/testdata/farbwerk_writes.txt`](internal/aqua/testdata/farbwerk_writes.txt),
+  details in [`re/PROTOCOL.md`](re/PROTOCOL.md)).
+  - Modes: Off, Single Colour, Rotating Colour Change, CPU Temperature, GPU Temperature and
+    Temperature Sensor 1–4. Temperature modes take two colours, the cold and the hot end of
+    the gradient range set in aquasuite.
+  - The Farbwerk's temperature modes follow its four hardware sensors or four **software
+    sensors** that aquasuite sends once a second. On Linux the plugin sends them instead:
+    software sensor 1 = CPU temperature (hwmon `k10temp`/`zenpower`/`coretemp`), 2 = GPU
+    temperature (`nvidia-smi`, else `amdgpu`), 4 = a constant.
+  - The Farbwerk has no plain colour mode, so Single Colour and Off are software sensor 4's
+    mode with both gradient colours equal.
+  - Left as aquasuite set them: gradient range, strip type, refresh speed, low-pass filter,
+    fading and "optimized colors".
+
 ## To Do
 
-- **Farbwerk Hub**: control non-Aquacomputer RGB accessories connected to the Farbwerk RGB
-  headers.
-  
+- Farbwerk: gradient range, refresh speed and strip type in CoolerControl; mode 0x08.
+
 ## System Status mode
 
 Both devices offer a **System Status (match fans)** lighting mode that mirrors coolerlink's

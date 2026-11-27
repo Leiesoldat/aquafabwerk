@@ -63,6 +63,15 @@ func main() {
 		log.Printf("LEAKSHIELD not available: %v (continuing without it)", err)
 	}
 
+	// Farbwerk: best-effort like the High Flow Next. Opening it also starts the software
+	// sensor feed (CPU/GPU temperature) its temperature modes follow.
+	if f, err := aqua.OpenFarbwerk(); err == nil {
+		svc.SetFarbwerk(f)
+		log.Println("Farbwerk opened; output channels published, software sensors fed")
+	} else {
+		log.Printf("Farbwerk not available: %v (continuing without it)", err)
+	}
+
 	go func() {
 		for attempt := 1; ; attempt++ {
 			d, err := aqua.OpenD5Next()

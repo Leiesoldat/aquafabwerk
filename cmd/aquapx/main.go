@@ -36,8 +36,12 @@ func parseColor(s string) ([3]byte, error) {
 
 func main() {
 	args := os.Args[1:]
-	if len(args) < 2 || (args[0] != "d5" && args[0] != "hfn" && args[0] != "ls") {
+	if len(args) < 2 || (args[0] != "d5" && args[0] != "hfn" && args[0] != "ls" && args[0] != "fw") {
 		usage()
+	}
+	if args[0] == "fw" {
+		runFarbwerk(args[1:])
+		return
 	}
 	if args[0] == "hfn" {
 		runHFN(args[1:])
@@ -336,6 +340,76 @@ func runStrip(d *aqua.D5Next, args []string) {
 	}
 }
 
+// runFarbwerk handles "aquapx fw ...": the original Farbwerk's four RGB outputs.
+func runFarbwerk(args []string) {
+	if args[0] == "sensors" { // read-only, no device needed
+		t := aqua.FarbwerkSensors()
+		fmt.Printf("software sensors aquapx feeds the Farbwerk: 1 CPU=%.1f°C  2 GPU=%.1f°C  3 unset  4 solid-colour constant=%.1f°C\n",
+			t[0], t[1], t[3])
+		return
+	}
+	f, err := aqua.OpenFarbwerk()
+	if err != nil {
+		fatal(err)
+	}
+	defer f.Close()
+	switch args[0] {
+	case "dump":
+		outs, err := f.Read()
+		if err != nil {
+			fatal(err)
+		}
+		for i, o := range outs {
+			fmt.Printf("output %d: %s fading=%v gradient %.1f-%.1f°C colour1=%04x/%04x/%04x colour2=%04x/%04x/%04x strip=%d\n",
+				i+1, aqua.FarbwerkModeName(o.Mode), o.Fading, o.FromC, o.ToC,
+				o.Color1[0], o.Color1[1], o.Color1[2], o.Color2[0], o.Color2[1], o.Color2[2], o.StripType)
+		}
+	case "set":
+		if len(args) < 3 {
+			fatal(fmt.Errorf("usage: aquapx fw set <1-4> <mode> [colour1] [colour2]  (modes: %s)", fwModeNames()))
+		}
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			fatal(fmt.Errorf("bad output %q", args[1]))
+		}
+		var c1, c2 *[3]byte
+		if len(args) >= 4 {
+			c, err := parseColor(args[3])
+			if err != nil {
+				fatal(err)
+			}
+			c1 = &c
+		}
+		if len(args) >= 5 {
+			c, err := parseColor(args[4])
+			if err != nil {
+				fatal(err)
+			}
+			c2 = &c
+		}
+		if err := f.Apply(n, args[2], c1, c2); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Farbwerk output %d -> %s\n", n, args[2])
+		if strings.HasSuffix(args[2], "temp") || args[2] == "static" || args[2] == "off" {
+			fmt.Println("note: this mode follows a software sensor; run the plugin (or 'aquapx fw feed') to keep it fed")
+		}
+	case "feed":
+		fmt.Println("feeding Farbwerk software sensors once a second (Ctrl-C to stop)")
+		aqua.RunFarbwerkSensors(f, make(chan struct{}))
+	default:
+		usage()
+	}
+}
+
+func fwModeNames() string {
+	var ns []string
+	for _, m := range aqua.FarbwerkLightingModes() {
+		ns = append(ns, m.Name)
+	}
+	return strings.Join(ns, ", ")
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `aquapx — Aquacomputer RGB control
 
@@ -357,6 +431,10 @@ usage:
   aquapx ls  effects                   list LEAKSHIELD effects
   aquapx ls  off                       LEAKSHIELD brightness 0
   aquapx ls  dump                      show LEAKSHIELD colour state
+  aquapx fw  dump                      Farbwerk: show all four outputs
+  aquapx fw  set <1-4> <mode> [c1] [c2] Farbwerk output mode (see 'set' usage for modes)
+  aquapx fw  sensors                   show the CPU/GPU temps aquapx feeds the Farbwerk
+  aquapx fw  feed                      feed the Farbwerk's software sensors (foreground)
   aquapx ls  probe [rid] [file]        READ-ONLY: GET_FEATURE (default 0x03), save + hexdump`)
 	os.Exit(2)
 }

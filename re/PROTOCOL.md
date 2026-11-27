@@ -183,3 +183,25 @@ the bar length. Nothing else changed, so no strip-specific brightness, on/off or
 was seen. The master brightness (237), just before the strip block, dims both the pump ring and the
 RGBpx LEDs (verified on hardware 2026-11-27). Whether the on/off flag (239) also covers the
 RGBpx LEDs is untested.
+
+## Farbwerk (original, 0c70:f00a) (decoded 2026-11-27)
+
+Five aquasuite captures, all changes on RGB output 4, 28 config writes, every CRC valid.
+
+- Config: feature report `0x03`, 237 bytes, CRC-16/USB over [1:235] big-endian at 235. Save:
+  output report `02 00 00 00 03 00 00 00 00 f4 fb`.
+- Four 48-byte output blocks at 18, 66, 114, 162:
+
+| Offset | Field |
+|---|---|
+| +0 | mode (low 7 bits): 0x00–0x03 sensor 1–4, 0x04–0x07 software sensor 1–4, 0x0a rotating colour change (0x08 seen, unknown); bit 7 = fading effect |
+| +2 | refresh speed (UI 1/5/10/15/20 = 100/40/14/5/0), with +41 (8/8/8/3/0) |
+| +3 | low-pass filter |
+| +4..5 / +6..7 | gradient from / to, °C × 100, u16 BE |
+| +8..13 / +14..19 | colour 1 / colour 2: hue, sat, val, each u16 BE on 0–4095 (val = the output's brightness slider) |
+| +21..22 | "optimized colors": 0x6487 on, 0xffff off |
+| +23 | strip type: 0 = 12V Green/Red/Blue, 1 = 12V Blue/Red/Green |
+
+- Software sensors: output report `0x04`, 15 bytes, once a second:
+  `04 [t1..t4] [s1..s4 u16 BE] [CRC-16/USB over 1..12]`, t = 0x06 set / 0x00 unset,
+  s = °C × 100, 0x7fff = unset.
