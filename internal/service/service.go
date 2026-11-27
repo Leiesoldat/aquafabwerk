@@ -35,10 +35,15 @@ type Server struct {
 	// statusStop cancels the running status loop (the "System Status" lighting mode, which
 	// drives both devices from GPU load). nil when the mode isn't active.
 	statusStop chan struct{}
+
+	// pumpBright caches the pump ring's brightness (0..100%) for Status, so CoolerControl's
+	// polling doesn't read the config report every second. -1 until first read or set.
+	brightMu   sync.Mutex
+	pumpBright int
 }
 
 // New builds a Server with no devices yet; call SetDevice/SetHFN once they're open.
-func New() *Server { return &Server{ready: make(chan struct{}), start: time.Now()} }
+func New() *Server { return &Server{ready: make(chan struct{}), start: time.Now(), pumpBright: -1} }
 
 // SetDevice publishes the opened pump and unblocks waiters.
 func (s *Server) SetDevice(d *aqua.D5Next) {
@@ -152,6 +157,16 @@ const (
 	deviceID = "aquapx-d5next"
 	hfnID    = "aquapx-highflownext"
 	lsID     = "aquapx-leakshield"
+
+	// D5 Next channel IDs. CoolerControl shows a lighting channel's ID rather than its label,
+	// so the IDs use Aquacomputer's names: "Pump" for the pump's LED ring and "RGBpx LED" for
+	// the RGBpx output header.
+	pumpChannel  = "Pump"
+	stripChannel = "RGBpx LED"
+	// pumpBrightChannel is a 0..100% "fan-style" channel that sets the D5 Next's master
+	// brightness (byte 237, verified on hardware to dim both the pump ring and the RGBpx LEDs):
+	// CoolerControl's lighting protocol has no brightness setting of its own.
+	pumpBrightChannel = "brightness"
 )
 
 // Health confirms the service is up.
@@ -164,7 +179,8 @@ func (s *Server) Health(_ context.Context, _ *dsv1.HealthRequest) (*dsv1.HealthR
 	}, nil
 }
 
-// ListDevices reports the D5 Next with a single lighting channel.
+// ListDevices reports the D5 Next (pump ring + RGB output strip channels) and any other
+// Aquacomputer devices found.
 func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*dsv1.ListDevicesResponse, error) {
 	_ = s.waitDev(30 * time.Second)
 	lm := &mv1.LightingModes{}
@@ -177,10 +193,30 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 			MaxColors:    m.MaxColors,
 		})
 	}
+	slm := &mv1.LightingModes{}
+	for _, m := range aqua.StripLightingModes() {
+		fn := m.Label
+		slm.LightingMode = append(slm.LightingMode, &mv1.LightingModes_LightingMode{
+			Name:         m.Name,
+			FrontendName: &fn,
+			MinColors:    m.MinColors,
+			MaxColors:    m.MaxColors,
+		})
+	}
 	channels := map[string]*mv1.ChannelInfo{
-		"lighting": {
-			Label:   strp("Pump RGB"),
+		pumpChannel: {
+			Label:   strp(pumpChannel),
 			Options: &mv1.ChannelInfo_LightingModes{LightingModes: lm},
+		},
+		stripChannel: {
+			Label:   strp(stripChannel),
+			Options: &mv1.ChannelInfo_LightingModes{LightingModes: slm},
+		},
+		pumpBrightChannel: {
+			Label: strp("D5 Next Brightness"),
+			Options: &mv1.ChannelInfo_SpeedOptions{SpeedOptions: &mv1.SpeedOptions{
+				MinDuty: 0, MaxDuty: 100, FixedEnabled: true,
+			}},
 		},
 	}
 	devs := []*mv1.Device{{
@@ -258,9 +294,59 @@ func (s *Server) InitializeDevice(_ context.Context, _ *dsv1.InitializeDeviceReq
 	return &dsv1.InitializeDeviceResponse{}, nil
 }
 
-// Status has no sensors to report here (the kernel driver already surfaces pump sensors).
-func (s *Server) Status(_ context.Context, _ *dsv1.StatusRequest) (*dsv1.StatusResponse, error) {
-	return &dsv1.StatusResponse{}, nil
+// Status reports the brightness channel's current value as its duty. There are no sensors
+// here (the kernel driver already surfaces the pump's sensors).
+func (s *Server) Status(_ context.Context, req *dsv1.StatusRequest) (*dsv1.StatusResponse, error) {
+	if req.GetDeviceId() != deviceID {
+		return &dsv1.StatusResponse{}, nil
+	}
+	dev := s.getDev()
+	if dev == nil {
+		return &dsv1.StatusResponse{}, nil
+	}
+	s.brightMu.Lock()
+	pct := s.pumpBright
+	s.brightMu.Unlock()
+	if pct < 0 {
+		p, err := dev.Brightness()
+		if err != nil {
+			return &dsv1.StatusResponse{}, nil
+		}
+		s.brightMu.Lock()
+		s.pumpBright, pct = p, p
+		s.brightMu.Unlock()
+	}
+	duty := float64(pct)
+	return &dsv1.StatusResponse{Status: []*mv1.Status{{
+		Id:     pumpBrightChannel,
+		Metric: &mv1.Status_Speed{Speed: &mv1.Status_FanSpeed{Duty: &duty}},
+	}}}, nil
+}
+
+// EnableManualFanControl is a no-op: the brightness channel needs no mode switch.
+func (s *Server) EnableManualFanControl(_ context.Context, _ *dsv1.EnableManualFanControlRequest) (*dsv1.EnableManualFanControlResponse, error) {
+	return &dsv1.EnableManualFanControlResponse{}, nil
+}
+
+// FixedDuty sets the D5 Next's brightness (pump ring and RGBpx LEDs) from the "D5 Next
+// Brightness" channel (0..100%).
+func (s *Server) FixedDuty(_ context.Context, req *dsv1.FixedDutyRequest) (*dsv1.FixedDutyResponse, error) {
+	log.Printf("fixed duty: device=%s channel=%s duty=%d", req.GetDeviceId(), req.GetChannelId(), req.GetDuty())
+	if req.GetDeviceId() != deviceID || req.GetChannelId() != pumpBrightChannel {
+		return &dsv1.FixedDutyResponse{}, nil
+	}
+	dev := s.getDev()
+	if dev == nil {
+		return &dsv1.FixedDutyResponse{}, nil
+	}
+	pct := int(req.GetDuty())
+	if err := dev.SetBrightness(pct); err != nil {
+		return nil, err
+	}
+	s.brightMu.Lock()
+	s.pumpBright = aqua.BrightnessByteToPercent(aqua.BrightnessPercentToByte(pct))
+	s.brightMu.Unlock()
+	return &dsv1.FixedDutyResponse{}, nil
 }
 
 // Lighting applies a lighting mode + base colour from the CoolerControl UI to the pump.
@@ -273,7 +359,19 @@ func (s *Server) Lighting(_ context.Context, req *dsv1.LightingRequest) (*dsv1.L
 	if cs := st.GetColors(); len(cs) > 0 {
 		r, g, b = byte(cs[0].GetR()), byte(cs[0].GetG()), byte(cs[0].GetB())
 	}
-	log.Printf("lighting: device=%s mode=%s colors=%d", req.GetDeviceId(), st.GetMode(), len(st.GetColors()))
+	log.Printf("lighting: device=%s channel=%s mode=%s colors=%d", req.GetDeviceId(), req.GetChannelId(), st.GetMode(), len(st.GetColors()))
+	// The D5 Next's RGBpx LED output is independent of the pump ring and the status loop.
+	// (Any other D5 Next channel, including "Pump", falls through to the pump ring below.)
+	if req.GetDeviceId() == deviceID && req.GetChannelId() == stripChannel {
+		dev := s.getDev()
+		if dev == nil {
+			return &dsv1.LightingResponse{}, nil
+		}
+		if err := dev.StripApplyLighting(st.GetMode(), r, g, b); err != nil {
+			return nil, err
+		}
+		return &dsv1.LightingResponse{}, nil
+	}
 	// "status" on either device drives BOTH from GPU load, matching the iCUE fans.
 	if st.GetMode() == "status" {
 		s.startStatus()

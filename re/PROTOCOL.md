@@ -25,7 +25,7 @@ Aquacomputer RGB yet — this is new.**
 | 0 | report ID | 0x03 |
 | **237** (0x0ed) | master **brightness** | 0x00=off … 0xff=full |
 | **239** (0x0ef) | on/off flag | 0x02 seen in "Off" capture |
-| **663** (0x297) | **effect selector** | 0x01=static/fixed, 0x02=breathing, 0x03=rainbow, … (15 modes captured) |
+| **663** (0x297) | **effect selector** | start of the 67-byte effect block [663:730), same layout and values as the LEAKSHIELD block at 577 (see below); 23 effects decoded 2026-11-27, table in `internal/aqua/d5next_effects.go` |
 | 674–689 | effect params | speed / direction / etc. (per-mode) |
 | **706–707** (0x2c2) | **hue** (uint16 BE) | scale ≈ 1536/360°: red=0x0000, green=0x01ff(≈120°), blue=0x03ff(≈240°) |
 | **708** (0x2c4) | **saturation** | 0xff=full colour, 0x00=white |
@@ -160,3 +160,26 @@ overlapping `GET_FEATURE` on one handle made both devices return `EPIPE` ("Broke
 stay wedged (sensors kept working via the kernel driver, but every feature report failed) until
 a **USBDEVFS_RESET + ~25s settle** cleared it. aquapx serialises whole read-modify-write cycles
 behind a per-device mutex, and the plugin runs a single status loop for both devices.
+
+## D5 Next effects (decoded 2026-11-27)
+
+One aquasuite capture stepping through all 23 D5 Next effects (base colour red, every CRC
+valid). Only **[663:730]** changes between effects. The block has the same layout as the
+LEAKSHIELD's [577:644]: selector, sub-parameter at +2, parameters, then 4-byte HSV colour slots
+from +43 (= 706, the hue field). The 15 effects both devices share are byte-identical.
+
+D5 Next-only selectors: Rain `0x0f`, Snowfall `0x10`, Stardust `0x11` (dim background in slot 0,
+drop/flake colour in slot 1), Sound flash `0x14`, Sound bars `0x15`, Sound slider `0x16`,
+Sound shift `0x17`, AMBIENTpx `0x18`. The sound effects and AMBIENTpx animate from data
+aquasuite streams from the PC, which isn't decoded yet.
+
+## D5 Next RGBpx LED output (decoded 2026-11-27)
+
+A second capture stepped through the same 23 effects on the RGB output header (LED strip), with
+the pump ring left on AMBIENTpx. Only **[243:310]** changes, and every write's CRC is valid. It's
+a second 67-byte effect block with the same layout and values as the pump's [663:730]. All 23
+blocks are identical except Sound bars byte +4: 0x0e on the strip, 0x14 on the pump, probably
+the bar length. Nothing else changed, so no strip-specific brightness, on/off or LED-count byte
+was seen. The master brightness (237), just before the strip block, dims both the pump ring and the
+RGBpx LEDs (verified on hardware 2026-11-27). Whether the on/off flag (239) also covers the
+RGBpx LEDs is untested.

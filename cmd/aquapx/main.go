@@ -98,6 +98,27 @@ func main() {
 		fmt.Printf("D5 Next: on=%v effect=0x%02x (%s) hue=0x%04x sat=%d brightness=%d\n",
 			s.On, s.Effect, s.EffectName, s.Hue, s.Saturation, s.Brightness)
 
+	case "rgbpx", "strip":
+		runStrip(d, args[2:])
+
+	case "brightness":
+		if len(args) < 3 {
+			pct, err := d.Brightness()
+			if err != nil {
+				fatal(err)
+			}
+			fmt.Printf("D5 Next brightness: %d%%\n", pct)
+			return
+		}
+		pct, err := strconv.Atoi(strings.TrimSuffix(args[2], "%"))
+		if err != nil || pct < 0 || pct > 100 {
+			fatal(fmt.Errorf("usage: aquapx d5 brightness [0-100]"))
+		}
+		if err := d.SetBrightness(pct); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next -> brightness %d%%\n", pct)
+
 	case "effects":
 		var es []string
 		for n := range aqua.Effects {
@@ -263,6 +284,58 @@ func hexdump(b []byte) {
 	}
 }
 
+// runStrip handles "aquapx d5 rgbpx ..." (alias "strip"): the D5 Next's RGBpx LED output,
+// independent of the pump ring.
+func runStrip(d *aqua.D5Next, args []string) {
+	if len(args) < 1 {
+		usage()
+	}
+	switch args[0] {
+	case "color":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx d5 rgbpx color <RRGGBB|name>"))
+		}
+		c, err := parseColor(args[1])
+		if err != nil {
+			fatal(err)
+		}
+		if err := d.StripSetColor(c[0], c[1], c[2]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next RGBpx LED -> solid #%02x%02x%02x\n", c[0], c[1], c[2])
+	case "effect":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx d5 rgbpx effect <name> [RRGGBB|name]"))
+		}
+		col := [3]byte{255, 255, 255}
+		if len(args) >= 3 {
+			c, err := parseColor(args[2])
+			if err != nil {
+				fatal(err)
+			}
+			col = c
+		}
+		if err := d.StripSetEffect(args[1], col[0], col[1], col[2]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next RGBpx LED -> effect %s\n", args[1])
+	case "off":
+		if err := d.StripOff(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("D5 Next RGBpx LED -> off")
+	case "dump":
+		s, err := d.StripRead()
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("D5 Next RGBpx LED: effect=0x%02x (%s) hue=0x%04x sat=%d value=%d\n",
+			s.Effect, s.EffectName, s.Hue, s.Saturation, s.Value)
+	default:
+		usage()
+	}
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `aquapx — Aquacomputer RGB control
 
@@ -270,8 +343,13 @@ usage:
   aquapx d5  color <RRGGBB|name>       solid colour (static effect)
   aquapx d5  effect <name> [colour]    onboard effect (see 'effects')
   aquapx d5  off                       LEDs off
+  aquapx d5  brightness [0-100]        show / set brightness (pump ring + RGBpx LEDs)
   aquapx d5  dump                      show current LED state
-  aquapx d5  effects                   list effect names
+  aquapx d5  effects                   list effect names (shared by pump and RGBpx LED)
+  aquapx d5  rgbpx color <RRGGBB|name> RGBpx LED output: solid colour
+  aquapx d5  rgbpx effect <name> [col] RGBpx LED output: onboard effect
+  aquapx d5  rgbpx off                 RGBpx LED output: colour at brightness 0
+  aquapx d5  rgbpx dump                RGBpx LED output: show effect/colour
   aquapx hfn color <RRGGBB|name>       recolour the flow indicator
   aquapx hfn dump                      show palette hues
   aquapx ls  color <RRGGBB|name>       LEAKSHIELD colour (hue/sat/brightness)
