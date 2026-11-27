@@ -173,13 +173,44 @@ func runLeakshield(args []string) {
 		}
 		fmt.Println("LEAKSHIELD -> off (brightness 0)")
 
+	case "effect":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx ls effect <name> [RRGGBB|name]  (see 'aquapx ls effects')"))
+		}
+		c := [3]byte{0xff, 0x00, 0x00}
+		if len(args) >= 3 {
+			if c, err = parseColor(args[2]); err != nil {
+				fatal(err)
+			}
+		}
+		if err := l.SetEffect(args[1], c[0], c[1], c[2]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("LEAKSHIELD -> effect %s (base #%02x%02x%02x)\n", args[1], c[0], c[1], c[2])
+
+	case "effects":
+		for _, m := range aqua.LeakshieldLightingModes() {
+			if m.Name == "off" || m.Name == "status" {
+				continue
+			}
+			note := "self-coloured"
+			if m.MinColors > 0 {
+				note = "takes a base colour"
+			}
+			fmt.Printf("  %-15s %-18s %s\n", m.Name, m.Label, note)
+		}
+
 	case "dump":
 		s, _, err := l.Read()
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Printf("LEAKSHIELD: hue=0x%04x (%.1f deg) sat=%d brightness=%d\n",
-			s.Hue, s.HueDeg, s.Saturation, s.Brightness)
+		eff := s.Effect
+		if eff == "" {
+			eff = "unknown"
+		}
+		fmt.Printf("LEAKSHIELD: effect=%s (0x%02x) hue=0x%04x (%.1f deg) sat=%d brightness=%d\n",
+			eff, s.EffectByte, s.Hue, s.HueDeg, s.Saturation, s.Brightness)
 
 	case "probe":
 		// aquapx ls probe [report-id-hex] [out-file]   (read-only)
@@ -244,6 +275,8 @@ usage:
   aquapx hfn color <RRGGBB|name>       recolour the flow indicator
   aquapx hfn dump                      show palette hues
   aquapx ls  color <RRGGBB|name>       LEAKSHIELD colour (hue/sat/brightness)
+  aquapx ls  effect <name> [color]     LEAKSHIELD onboard effect (base colour default red)
+  aquapx ls  effects                   list LEAKSHIELD effects
   aquapx ls  off                       LEAKSHIELD brightness 0
   aquapx ls  dump                      show LEAKSHIELD colour state
   aquapx ls  probe [rid] [file]        READ-ONLY: GET_FEATURE (default 0x03), save + hexdump`)

@@ -221,16 +221,19 @@ func (s *Server) ListDevices(_ context.Context, _ *dsv1.ListDevicesRequest) (*ds
 			},
 		})
 	}
-	// LEAKSHIELD: colour (hue/sat/brightness) decoded from aquasuite captures; no effect
-	// selector yet, so static colour, off (brightness 0) and the shared status mode.
+	// LEAKSHIELD: single colour, all 16 onboard effects (decoded from aquasuite captures),
+	// off (brightness 0) and the shared status mode.
 	if s.getLS() != nil {
 		llm := &mv1.LightingModes{}
-		cn, on, sn := "Colour", "Off", "System Status (match fans)"
-		llm.LightingMode = append(llm.LightingMode,
-			&mv1.LightingModes_LightingMode{Name: "static", FrontendName: &cn, MinColors: 1, MaxColors: 1},
-			&mv1.LightingModes_LightingMode{Name: "off", FrontendName: &on, MinColors: 0, MaxColors: 0},
-			&mv1.LightingModes_LightingMode{Name: "status", FrontendName: &sn, MinColors: 0, MaxColors: 0},
-		)
+		for _, m := range aqua.LeakshieldLightingModes() {
+			fn := m.Label
+			llm.LightingMode = append(llm.LightingMode, &mv1.LightingModes_LightingMode{
+				Name:         m.Name,
+				FrontendName: &fn,
+				MinColors:    m.MinColors,
+				MaxColors:    m.MaxColors,
+			})
+		}
 		devs = append(devs, &mv1.Device{
 			Id:   lsID,
 			Name: "Aquacomputer LEAKSHIELD (RGB)",
