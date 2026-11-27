@@ -104,10 +104,11 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
 
 ## To Do
 
-- **Ultitube Reservoir**
 - **D5 Next RGB output**: control the RGB accessories connected to the D5 Next's RGB output
   header (separate from the pump's own LED ring). Needs captures of aquasuite changing the
   output's colour/effect to find its fields in report `0x03`.
+- **Farbwerk Hub**: control non-Aquacomputer RGB accessories connected to the Farbwerk RGB
+  headers.
   
 ## System Status mode
 
