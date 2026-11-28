@@ -365,9 +365,9 @@ func runFarbwerk(args []string) {
 			"template": "built-in template (the Farbwerk can't be read and nothing was written yet)",
 		}[f.Source])
 		for i, o := range outs {
-			fmt.Printf("output %d: %s fading=%v gradient %.1f-%.1f°C colour1=%04x/%04x/%04x colour2=%04x/%04x/%04x strip=%d\n",
+			fmt.Printf("output %d: %s fading=%v gradient %.1f-%.1f°C colour1=%04x/%04x/%04x colour2=%04x/%04x/%04x strip=%s\n",
 				i+1, aqua.FarbwerkModeName(o.Mode), o.Fading, o.FromC, o.ToC,
-				o.Color1[0], o.Color1[1], o.Color1[2], o.Color2[0], o.Color2[1], o.Color2[2], o.StripType)
+				o.Color1[0], o.Color1[1], o.Color1[2], o.Color2[0], o.Color2[1], o.Color2[2], aqua.FarbwerkStripName(o.StripType))
 		}
 	case "set":
 		if len(args) < 3 {
@@ -413,6 +413,50 @@ func runFarbwerk(args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Farbwerk: all outputs %s\n", args[1])
+	case "strip":
+		if len(args) < 2 {
+			fatal(fmt.Errorf("usage: aquapx fw strip <1-4> [grb|brg]"))
+		}
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			fatal(fmt.Errorf("bad output %q", args[1]))
+		}
+		if len(args) < 3 {
+			outs, err := f.Read()
+			if err != nil {
+				fatal(err)
+			}
+			if n < 1 || n > len(outs) {
+				fatal(fmt.Errorf("output %d out of range 1-%d", n, len(outs)))
+			}
+			fmt.Printf("output %d strip type: %s\n", n, aqua.FarbwerkStripName(outs[n-1].StripType))
+			return
+		}
+		t, ok := aqua.FarbwerkStripTypes[strings.ToLower(args[2])]
+		if !ok {
+			fatal(fmt.Errorf("unknown strip type %q (grb = 12V Green/Red/Blue, brg = 12V Blue/Red/Green)", args[2]))
+		}
+		if err := f.SetStripType(n, t); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Farbwerk output %d strip type -> %s\n", n, aqua.FarbwerkStripName(t))
+	case "range":
+		if len(args) < 4 {
+			fatal(fmt.Errorf("usage: aquapx fw range <1-4> <from °C> <to °C>"))
+		}
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			fatal(fmt.Errorf("bad output %q", args[1]))
+		}
+		from, err1 := strconv.ParseFloat(args[2], 64)
+		to, err2 := strconv.ParseFloat(args[3], 64)
+		if err1 != nil || err2 != nil {
+			fatal(fmt.Errorf("usage: aquapx fw range <1-4> <from °C> <to °C>"))
+		}
+		if err := f.SetRange(n, from, to); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Farbwerk output %d gradient -> %.1f-%.1f °C (colour 1 at %.1f, colour 2 at %.1f)\n", n, from, to, from, to)
 	case "feed":
 		fmt.Println("feeding Farbwerk software sensors once a second (Ctrl-C to stop)")
 		aqua.RunFarbwerkSensors(f, make(chan struct{}))
@@ -452,6 +496,8 @@ usage:
   aquapx ls  dump                      show LEAKSHIELD colour state
   aquapx fw  dump                      Farbwerk: show all four outputs
   aquapx fw  set <1-4> <mode> [c1] [c2] Farbwerk output mode (see 'set' usage for modes)
+  aquapx fw  strip <1-4> [grb|brg]     show / set an output's strip type (colour order)
+  aquapx fw  range <1-4> <from> <to>   set an output's gradient range in °C
   aquapx fw  all on|off                all outputs off (brightness 0) / back on
   aquapx fw  sensors                   show the CPU/GPU temps aquapx feeds the Farbwerk
   aquapx fw  feed                      feed the Farbwerk's software sensors (foreground)

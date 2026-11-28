@@ -354,19 +354,19 @@ var fwTempModes = map[string]byte{
 }
 
 // FarbwerkLightingModes is the CoolerControl mode list for each Farbwerk output.
-// Temperature modes take two colours: the cold end, then the hot end of aquasuite's gradient
-// range.
+// Temperature modes require two colours (CoolerControl shows as many pickers as MinColors):
+// the cold end, then the hot end of the gradient range (aquapx fw range).
 func FarbwerkLightingModes() []LightingMode {
 	return []LightingMode{
 		{"off", "Off", 0, 0},
 		{"static", "Single Colour", 1, 1},
 		{"rotating", "Rotating Colour Change", 0, 0},
-		{"cputemp", "CPU Temperature", 1, 2},
-		{"gputemp", "GPU Temperature", 1, 2},
-		{"sensor1", "Temperature Sensor 1", 1, 2},
-		{"sensor2", "Temperature Sensor 2", 1, 2},
-		{"sensor3", "Temperature Sensor 3", 1, 2},
-		{"sensor4", "Temperature Sensor 4", 1, 2},
+		{"cputemp", "CPU Temperature", 2, 2},
+		{"gputemp", "GPU Temperature", 2, 2},
+		{"sensor1", "Temperature Sensor 1", 2, 2},
+		{"sensor2", "Temperature Sensor 2", 2, 2},
+		{"sensor3", "Temperature Sensor 3", 2, 2},
+		{"sensor4", "Temperature Sensor 4", 2, 2},
 	}
 }
 
@@ -588,4 +588,63 @@ func FarbwerkAllModes() []LightingMode {
 		{"on", "On", 0, 0},
 		{"off", "Off", 0, 0},
 	}
+}
+
+// Strip types (block +23), from aquasuite's list.
+var FarbwerkStripTypes = map[string]byte{
+	"grb": 0, // 12V, Green, Red, Blue
+	"brg": 1, // 12V, Blue, Red, Green
+}
+
+// FarbwerkStripName names a strip type value.
+func FarbwerkStripName(v byte) string {
+	switch v {
+	case 0:
+		return "12V, Green, Red, Blue (grb)"
+	case 1:
+		return "12V, Blue, Red, Green (brg)"
+	}
+	return fmt.Sprintf("unknown %d", v)
+}
+
+// fwModify runs fn on the config and writes it back.
+func (f *Farbwerk) fwModify(fn func(cfg []byte) error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cfg, err := f.readConfig()
+	if err != nil {
+		return err
+	}
+	if err := fn(cfg); err != nil {
+		return err
+	}
+	return f.writeConfig(cfg)
+}
+
+// SetStripType sets output n's strip type (the colour channel order of the connected strip).
+func (f *Farbwerk) SetStripType(n int, t byte) error {
+	return f.fwModify(func(cfg []byte) error {
+		o, err := fwBlock(n)
+		if err != nil {
+			return err
+		}
+		cfg[o+fwOffStrip] = t
+		return nil
+	})
+}
+
+// SetRange sets output n's gradient range in °C: colour 1 at from, colour 2 at to.
+func (f *Farbwerk) SetRange(n int, from, to float64) error {
+	if from < 0 || to > 300 || to <= from {
+		return fmt.Errorf("bad range %.1f-%.1f °C (need 0 <= from < to <= 300)", from, to)
+	}
+	return f.fwModify(func(cfg []byte) error {
+		o, err := fwBlock(n)
+		if err != nil {
+			return err
+		}
+		fwPut16(cfg, o+fwOffFromTemp, uint16(math.Round(from*100)))
+		fwPut16(cfg, o+fwOffToTemp, uint16(math.Round(to*100)))
+		return nil
+	})
 }

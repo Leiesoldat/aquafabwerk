@@ -323,3 +323,12 @@ func TestFarbwerkRangeAfterRotating(t *testing.T) {
 		t.Error("a valid range was overwritten")
 	}
 }
+
+// Temperature modes require two colours, so CoolerControl shows both pickers.
+func TestFarbwerkTempModesTwoColours(t *testing.T) {
+	for _, m := range FarbwerkLightingModes() {
+		if _, temp := fwTempModes[m.Name]; temp && (m.MinColors != 2 || m.MaxColors != 2) {
+			t.Errorf("%s: colours %d-%d, want 2-2", m.Name, m.MinColors, m.MaxColors)
+		}
+	}
+}

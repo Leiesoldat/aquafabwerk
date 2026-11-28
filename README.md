@@ -46,6 +46,8 @@ aquapx d5 brightness [0-100]      # D5 Next brightness (pump ring + RGBpx LEDs)
 aquapx d5 rgbpx color|effect|off|dump  # D5 Next RGBpx LED output
 aquapx fw dump                    # Farbwerk: all four RGB outputs
 aquapx fw set <1-4> <mode> [c1] [c2]  # Farbwerk output mode and colours
+aquapx fw strip <1-4> [grb|brg]   # Farbwerk: show / set an output's strip type (colour order)
+aquapx fw range <1-4> <from> <to> # Farbwerk: gradient range in °C (colour 1 at from, 2 at to)
 aquapx fw all on|off              # Farbwerk: all outputs off / back on
 aquapx fw sensors                 # temperatures fed to the Farbwerk's software sensors
 aquapx fw feed                    # feed the software sensors in the foreground
@@ -168,10 +170,13 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     as set.
   - CoolerControl title-cases "RGB Output 1" to "Rgb Output 1"; rename the channels in
     CoolerControl, as for the D5 Next's RGBpx LED.
+  - Temperature modes show two colour pickers in CoolerControl (cold and hot end). The
+    temperature range can't be sent through CoolerControl's lighting settings, so it's set with
+    `aquapx fw range`; the strip type with `aquapx fw strip`.
   - Rotating Colour Change leaves the gradient range at 0–0 °C. When a temperature mode is
     picked and the range is empty, aquapx sets 30–80 °C (CPU/GPU) or 20–50 °C (hardware
     sensors); a valid range set in aquasuite is kept.
-  - Left as aquasuite set them: gradient range (when valid), strip type, refresh speed, low-pass filter,
+  - Left as aquasuite set them: gradient range (when valid), strip type (unless set with the CLI), refresh speed, low-pass filter,
     fading and "optimized colors".
 
 ## To Do
