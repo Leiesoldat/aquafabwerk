@@ -3,9 +3,11 @@ package aqua
 // Farbwerk (original, 4 RGB outputs, USB 0c70:f00a), decoded 2026-11-27 from aquasuite USB
 // captures (testdata/farbwerk_*.txt, re/PROTOCOL.md):
 //
-//   - Config: HID feature report 0x03, 237 bytes, CRC-16/USB over [1:235] big-endian at 235.
-//     Same read-modify-write procedure as the other devices, then the save report 0x02 as an
-//     OUTPUT report (like the LEAKSHIELD), with 0x03 where the D5 Next's has 0x02.
+//   - Config: HID feature report 0x03, 237 bytes, CRC-16/USB over [1:235] big-endian at 235,
+//     then the save report 0x02 as an OUTPUT report (like the LEAKSHIELD), with 0x03 where the
+//     D5 Next's has 0x02. Unlike the other devices, the original Farbwerk stalls a read of
+//     report 0x03 (aquasuite never reads it), so aquapx keeps the last written config in a
+//     file and modifies that (see readConfig).
 //   - Four 48-byte blocks, one per RGB output, at 18, 66, 114, 162 (see fwOff* below).
 //   - Software sensors: aquasuite sends output report 0x04 once a second with four
 //     temperatures (°C x 100). The "Temperature controlled by software sensor" modes follow
@@ -15,12 +17,16 @@ package aqua
 // whose two gradient colours are equal (fwSolidSensor, fed a constant by the plugin).
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	ghid "github.com/sstallion/go-hid"
 )
@@ -53,6 +59,11 @@ const (
 	fwSensorUnset  = 0x7fff
 	fwSensorSet    = 0x06 // per-sensor "present" byte
 
+	fwReadTries    = 4
+	fwRetryDelay   = 60 * time.Millisecond
+	fwMaxReadFails = 3
+	fwSensorQuiet  = 100 * time.Millisecond // gap after a sensor report before a config read
+
 	// fwSolidSensor is the software sensor (0-based) whose mode carries solid colours.
 	fwSolidSensor = 3
 )
@@ -73,6 +84,13 @@ type Farbwerk struct {
 	dev    *ghid.Device
 	NoSave bool
 	mu     sync.Mutex // serialises feature/output report traffic on the handle
+
+	// ConfigPath overrides FarbwerkConfigPath (tests). Source is where the last config read
+	// came from: "device", "saved" or "template".
+	ConfigPath string
+	Source     string
+	readFails  int       // consecutive failed readConfig calls; at fwMaxReadFails the device isn't asked
+	lastSensor time.Time // when the last software sensor report was sent
 }
 
 // OpenFarbwerk opens the Farbwerk's HID interface (Enumerate+OpenPath, see OpenD5Next).
@@ -111,20 +129,75 @@ func (f *Farbwerk) Close() error {
 	return ghid.Exit()
 }
 
+// readConfig returns the current config. The original Farbwerk sometimes stalls GET_FEATURE
+// 0x03 ("broken pipe"), most likely while it is still handling the once-a-second software
+// sensor report, and aquasuite never reads it at all. So a read is retried a few times; if it
+// still fails, the copy saved after every write (FarbwerkConfigPath) is used, or the built-in
+// template the first time (fwTemplateHex). After fwMaxReadFails failed calls in a row the
+// device isn't asked again.
 func (f *Farbwerk) readConfig() ([]byte, error) {
-	buf := make([]byte, fwLen)
-	buf[0] = fwReport
-	n, err := f.dev.GetFeatureReport(buf)
-	if err != nil {
-		return nil, fmt.Errorf("get report 0x03: %w", err)
+	if f.readFails < fwMaxReadFails {
+		if d := fwSensorQuiet - time.Since(f.lastSensor); d > 0 {
+			time.Sleep(d) // let the Farbwerk finish handling the sensor report first
+		}
+		var lastErr error
+		for try := 0; try < fwReadTries; try++ {
+			if try > 0 {
+				time.Sleep(fwRetryDelay)
+			}
+			buf := make([]byte, fwLen)
+			buf[0] = fwReport
+			n, err := f.dev.GetFeatureReport(buf)
+			if err == nil && n == fwLen && fwCRCOK(buf) {
+				f.readFails = 0
+				f.Source = "device"
+				return buf, nil
+			}
+			if err == nil {
+				err = fmt.Errorf("%d bytes / bad CRC", n)
+			}
+			lastErr = err
+		}
+		f.readFails++
+		log.Printf("farbwerk: config read failed %d times (%v); using the saved copy", fwReadTries, lastErr)
+		if f.readFails == fwMaxReadFails {
+			log.Printf("farbwerk: config reads keep failing; not asking the device again")
+		}
 	}
-	if n != fwLen {
-		return nil, fmt.Errorf("unexpected config length %d (want %d): layout not confirmed, refusing", n, fwLen)
+	return fwStoredConfig(f.configPath(), &f.Source)
+}
+
+// fwStoredConfig loads the saved config copy, or the template when there is none (or it's
+// damaged). src is set to "saved" or "template".
+func fwStoredConfig(path string, src *string) ([]byte, error) {
+	if path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			if cfg, err := hex.DecodeString(strings.TrimSpace(string(b))); err == nil && len(cfg) == fwLen && fwCRCOK(cfg) {
+				*src = "saved"
+				return cfg, nil
+			}
+			log.Printf("farbwerk: saved config %s is damaged; using the template", path)
+		}
 	}
-	if !fwCRCOK(buf) {
-		return nil, fmt.Errorf("config CRC self-check failed: framing/offsets not confirmed, refusing")
+	cfg, err := hex.DecodeString(fwTemplateHex)
+	if err != nil || len(cfg) != fwLen || !fwCRCOK(cfg) {
+		return nil, fmt.Errorf("built-in Farbwerk template is invalid")
 	}
-	return buf, nil
+	*src = "template"
+	return cfg, nil
+}
+
+func (f *Farbwerk) configPath() string {
+	if f.ConfigPath != "" {
+		return f.ConfigPath
+	}
+	return FarbwerkConfigPath()
+}
+
+// FarbwerkConfigPath is where the last written Farbwerk config is kept (shared by the plugin
+// and the CLI), next to the "All off" levels.
+func FarbwerkConfigPath() string {
+	return filepath.Join(filepath.Dir(FarbwerkStatePath()), "farbwerk-config.hex")
 }
 
 func (f *Farbwerk) writeConfig(cfg []byte) error {
@@ -135,6 +208,11 @@ func (f *Farbwerk) writeConfig(cfg []byte) error {
 	if _, err := f.dev.SendFeatureReport(cfg); err != nil {
 		return fmt.Errorf("set report 0x03: %w", err)
 	}
+	if p := f.configPath(); p != "" {
+		if err := saveFile(p, []byte(hex.EncodeToString(cfg)+"\n")); err != nil {
+			log.Printf("farbwerk: couldn't save config copy to %s: %v", p, err)
+		}
+	}
 	if f.NoSave {
 		return nil
 	}
@@ -142,6 +220,15 @@ func (f *Farbwerk) writeConfig(cfg []byte) error {
 		return fmt.Errorf("save report 0x02 (output): %w", err)
 	}
 	return nil
+}
+
+// saveFile writes b to path atomically (temp file + rename).
+func saveFile(path string, b []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func fwCRCOK(b []byte) bool {
@@ -349,7 +436,9 @@ func fwSensorPacket(temps [4]float64) []byte {
 func (f *Farbwerk) SetSoftwareSensors(temps [4]float64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, err := f.dev.Write(fwSensorPacket(temps)); err != nil {
+	_, err := f.dev.Write(fwSensorPacket(temps))
+	f.lastSensor = time.Now()
+	if err != nil {
 		return fmt.Errorf("software sensor report 0x04: %w", err)
 	}
 	return nil
@@ -441,11 +530,7 @@ func saveFarbwerkLevels(path string, l FarbwerkLevels) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return saveFile(path, b)
 }
 
 func loadFarbwerkLevels(path string) (FarbwerkLevels, error) {

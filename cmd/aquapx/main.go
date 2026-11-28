@@ -359,6 +359,11 @@ func runFarbwerk(args []string) {
 		if err != nil {
 			fatal(err)
 		}
+		fmt.Printf("config source: %s\n", map[string]string{
+			"device":   "read from the Farbwerk",
+			"saved":    "aquapx's saved copy of the last write (the Farbwerk can't be read)",
+			"template": "built-in template (the Farbwerk can't be read and nothing was written yet)",
+		}[f.Source])
 		for i, o := range outs {
 			fmt.Printf("output %d: %s fading=%v gradient %.1f-%.1f°C colour1=%04x/%04x/%04x colour2=%04x/%04x/%04x strip=%d\n",
 				i+1, aqua.FarbwerkModeName(o.Mode), o.Fading, o.FromC, o.ToC,

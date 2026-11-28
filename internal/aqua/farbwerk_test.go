@@ -264,3 +264,32 @@ func TestFarbwerkAllOffOn(t *testing.T) {
 		t.Error("output 4, set after All off, was overwritten")
 	}
 }
+
+// Without a device read, the config comes from the saved copy, else the template; a damaged
+// copy falls back to the template.
+func TestFarbwerkStoredConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "farbwerk-config.hex")
+	var src string
+	tpl, err := fwStoredConfig(path, &src)
+	if err != nil || src != "template" {
+		t.Fatalf("no saved copy: src=%q err=%v", src, err)
+	}
+	o4, _ := fwBlock(4)
+	if tpl[o4+fwOffStrip] != 0 {
+		t.Errorf("template output 4 strip type = %d, want 0 (Green/Red/Blue)", tpl[o4+fwOffStrip])
+	}
+	_ = fwApply(tpl, 4, "static", &[3]byte{0, 0, 255}, nil)
+	fwFixCRC(tpl)
+	if err := saveFile(path, []byte(hex.EncodeToString(tpl)+"\n")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fwStoredConfig(path, &src)
+	if err != nil || src != "saved" || string(got) != string(tpl) {
+		t.Errorf("saved copy not returned: src=%q err=%v", src, err)
+	}
+	_ = os.WriteFile(path, []byte("00ff"), 0o644)
+	if _, err := fwStoredConfig(path, &src); err != nil || src != "template" {
+		t.Errorf("damaged copy: src=%q err=%v", src, err)
+	}
+}
