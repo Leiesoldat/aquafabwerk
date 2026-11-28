@@ -66,8 +66,8 @@ go build -o bin/aquapx ./cmd/aquapx
 sudo bash install.sh
 ```
 
-`install.sh` installs the `aquapx` CLI to `/usr/local/bin` (writable on image-based distros too),
-so the CLI is always updated together with the plugin. It copies the plugin binary and manifest
+`install.sh` installs the `aquapx` CLI to your `~/.local/bin` (the user who ran `sudo`; root's
+install goes to `/usr/local/bin`), so the CLI is always updated together with the plugin. It copies the plugin binary and manifest
 to `/var/lib/coolercontrol/plugins/aquapx/`, and on
 SELinux systems (Bazzite, Fedora Atomic, …) labels the binary `bin_t`. Without that label systemd
 (`init_t`) is denied `execute` on files labelled `var_lib_t` and the plugin never starts. The
