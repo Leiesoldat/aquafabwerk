@@ -50,4 +50,10 @@ if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
 fi
 
 systemctl restart coolercontrold
+# coolercontrold runs the plugin as its own service; restart it too, or the old binary keeps
+# running after an update.
+if systemctl list-unit-files cc-plugin-aquapx.service >/dev/null 2>&1 &&
+	systemctl cat cc-plugin-aquapx.service >/dev/null 2>&1; then
+	systemctl restart cc-plugin-aquapx.service
+fi
 echo "installed plugin to $dest and CLI to $cli_dest/aquapx"

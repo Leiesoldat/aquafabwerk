@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 )
 
 func main() {
+	log.Printf("aquapx-plugin starting, build %s", buildID())
 	sock := os.Getenv("AQUAPX_SOCK")
 	if sock == "" {
 		sock = "/run/aquapx.sock"
@@ -89,4 +91,29 @@ func main() {
 	if err := srv.Serve(lis); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
+}
+
+// buildID is the git commit the binary was built from (Go records it when building inside a
+// git checkout), so the journal shows which build is running.
+func buildID() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	rev, dirty := "unknown", false
+	for _, kv := range info.Settings {
+		switch kv.Key {
+		case "vcs.revision":
+			rev = kv.Value
+			if len(rev) > 7 {
+				rev = rev[:7]
+			}
+		case "vcs.modified":
+			dirty = kv.Value == "true"
+		}
+	}
+	if dirty {
+		rev += "+local changes"
+	}
+	return rev
 }
