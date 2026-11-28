@@ -42,7 +42,17 @@ aquapx ls effect <name> [colour]  # LEAKSHIELD onboard effect (see: aquapx ls ef
 aquapx ls effects                 # list LEAKSHIELD effects
 aquapx ls off                     # LEAKSHIELD brightness 0
 aquapx ls dump                    # LEAKSHIELD colour state
+aquapx d5 brightness [0-100]      # D5 Next brightness (pump ring + RGBpx LEDs)
+aquapx d5 rgbpx color|effect|off|dump  # D5 Next RGBpx LED output
+aquapx fw dump                    # Farbwerk: all four RGB outputs
+aquapx fw set <1-4> <mode> [c1] [c2]  # Farbwerk output mode and colours
+aquapx fw all on|off              # Farbwerk: all outputs off / back on
+aquapx fw sensors                 # temperatures fed to the Farbwerk's software sensors
+aquapx fw feed                    # feed the software sensors in the foreground
 ```
+
+`aquapx fw sensors` needs no root; the commands that talk to a device need access to its
+`hidraw` node (`sudo`, or a udev rule).
 
 ## CoolerControl plugin
 
@@ -52,10 +62,13 @@ the pump as a **lighting device**. The pump's sensors continue to come from the 
 
 ```
 go build -o bin/aquapx-plugin ./cmd/aquapx-plugin
+go build -o bin/aquapx ./cmd/aquapx
 sudo bash install.sh
 ```
 
-`install.sh` copies the binary and manifest to `/var/lib/coolercontrol/plugins/aquapx/`, and on
+`install.sh` installs the `aquapx` CLI to `/usr/local/bin` (writable on image-based distros too),
+so the CLI is always updated together with the plugin. It copies the plugin binary and manifest
+to `/var/lib/coolercontrol/plugins/aquapx/`, and on
 SELinux systems (Bazzite, Fedora Atomic, …) labels the binary `bin_t`. Without that label systemd
 (`init_t`) is denied `execute` on files labelled `var_lib_t` and the plugin never starts. The
 manifest's `executable` must be an absolute path.
