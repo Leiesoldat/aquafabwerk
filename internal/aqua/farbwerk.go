@@ -277,8 +277,8 @@ func fwSetMode(cfg []byte, n int, mode byte) error {
 //   - a temperature mode (see FarbwerkLightingModes): the mode, with colours c1 (cold end)
 //     and c2 (hot end); c2 defaults to c1
 //
-// Strip type, fading, optimised colours, refresh speed, low-pass filter and the gradient
-// range are left as aquasuite set them.
+// Strip type, fading, optimised colours, refresh speed and low-pass filter are left as
+// aquasuite set them, and so is the gradient range unless it is empty (fwEnsureRange).
 func fwApply(cfg []byte, n int, mode string, c1, c2 *[3]byte) error {
 	o, err := fwBlock(n)
 	if err != nil {
@@ -307,6 +307,7 @@ func fwApply(cfg []byte, n int, mode string, c1, c2 *[3]byte) error {
 	if err := fwSetMode(cfg, n, m); err != nil {
 		return err
 	}
+	fwEnsureRange(cfg, o, mode)
 	if c1 != nil {
 		if c2 == nil {
 			c2 = c1
@@ -315,6 +316,30 @@ func fwApply(cfg []byte, n int, mode string, c1, c2 *[3]byte) error {
 		fwPutColor(cfg, o+fwOffColor2, c2[0], c2[1], c2[2])
 	}
 	return nil
+}
+
+// Default gradient ranges (°C) for temperature modes whose range is empty. Rotating colour
+// change leaves "gradient to" at 0 (aquasuite writes it back when leaving that mode), so
+// switching straight to a temperature mode would otherwise give a 0-0 °C gradient.
+var (
+	fwRangeHost   = [2]float64{30, 80} // CPU / GPU
+	fwRangeSensor = [2]float64{20, 50} // hardware sensors (usually water temperature)
+)
+
+// fwEnsureRange sets a default gradient range on the block at o if its range is empty or
+// backwards (to <= from). A valid range set in aquasuite is kept.
+func fwEnsureRange(cfg []byte, o int, mode string) {
+	from := fwGet16(cfg, o+fwOffFromTemp)
+	to := fwGet16(cfg, o+fwOffToTemp)
+	if to > from {
+		return
+	}
+	r := fwRangeSensor
+	if mode == "cputemp" || mode == "gputemp" || mode == "static" || mode == "off" {
+		r = fwRangeHost
+	}
+	fwPut16(cfg, o+fwOffFromTemp, uint16(r[0]*100))
+	fwPut16(cfg, o+fwOffToTemp, uint16(r[1]*100))
 }
 
 // fwTempModes maps CoolerControl mode names to Farbwerk temperature modes. Software sensor 1

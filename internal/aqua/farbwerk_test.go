@@ -129,7 +129,8 @@ func TestFarbwerkApply(t *testing.T) {
 			for i := range got {
 				inMode := i == o+fwOffMode
 				inColours := i >= o+fwOffColor1 && i < o+fwOffColor2+6
-				if !inMode && !inColours && got[i] != base[i] {
+				inRange := i >= o+fwOffFromTemp && i < o+fwOffToTemp+2
+				if !inMode && !inColours && !inRange && got[i] != base[i] {
 					t.Errorf("output %d %s: byte %d changed", n, m.Name, i)
 				}
 			}
@@ -291,5 +292,34 @@ func TestFarbwerkStoredConfig(t *testing.T) {
 	_ = os.WriteFile(path, []byte("00ff"), 0o644)
 	if _, err := fwStoredConfig(path, &src); err != nil || src != "template" {
 		t.Errorf("damaged copy: src=%q err=%v", src, err)
+	}
+}
+
+// Leaving Rotating Colour Change (gradient "to" = 0) for a temperature mode gets a usable
+// range, as aquasuite writes one; a valid range is kept.
+func TestFarbwerkRangeAfterRotating(t *testing.T) {
+	fx, _ := loadFW(t)
+	o, _ := fwBlock(4)
+	rot := fx["rotating-1"]
+	if fwGet16(rot, o+fwOffToTemp) != 0 {
+		t.Fatalf("fixture: rotating gradient-to = %#x, want 0", fwGet16(rot, o+fwOffToTemp))
+	}
+	got := fwCopy(rot)
+	if err := fwApply(got, 4, "cputemp", &[3]byte{0, 0, 255}, &[3]byte{255, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if f, to := fwGet16(got, o+fwOffFromTemp), fwGet16(got, o+fwOffToTemp); f != 3000 || to != 8000 {
+		t.Errorf("cputemp after rotating: range %d-%d, want 3000-8000", f, to)
+	}
+	got = fwCopy(rot)
+	_ = fwApply(got, 4, "sensor1", &[3]byte{0, 0, 255}, nil)
+	if f, to := fwGet16(got, o+fwOffFromTemp), fwGet16(got, o+fwOffToTemp); f != 2000 || to != 5000 {
+		t.Errorf("sensor1 after rotating: range %d-%d, want 2000-5000", f, to)
+	}
+	valid := fx["software-1"] // aquasuite's own 0-50 °C range
+	got = fwCopy(valid)
+	_ = fwApply(got, 4, "gputemp", &[3]byte{0, 255, 0}, nil)
+	if string(got[o+fwOffFromTemp:o+fwOffToTemp+2]) != string(valid[o+fwOffFromTemp:o+fwOffToTemp+2]) {
+		t.Error("a valid range was overwritten")
 	}
 }

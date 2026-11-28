@@ -168,7 +168,10 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c70", GROUP="input", MODE="0660", TAG+="
     as set.
   - CoolerControl title-cases "RGB Output 1" to "Rgb Output 1"; rename the channels in
     CoolerControl, as for the D5 Next's RGBpx LED.
-  - Left as aquasuite set them: gradient range, strip type, refresh speed, low-pass filter,
+  - Rotating Colour Change leaves the gradient range at 0–0 °C. When a temperature mode is
+    picked and the range is empty, aquapx sets 30–80 °C (CPU/GPU) or 20–50 °C (hardware
+    sensors); a valid range set in aquasuite is kept.
+  - Left as aquasuite set them: gradient range (when valid), strip type, refresh speed, low-pass filter,
     fading and "optimized colors".
 
 ## To Do
